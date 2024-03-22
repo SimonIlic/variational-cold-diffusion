@@ -1,6 +1,12 @@
 # ignore .history folder
 .history
 
+# ignore runs
+runs
+
+# ignore what's in the data folder
+data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
