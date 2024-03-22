@@ -6,6 +6,7 @@ runs
 
 # ignore what's in the data folder
 data/
+configs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
