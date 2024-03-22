@@ -63,20 +63,36 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
     sigma = config.model.sigma
     label_sampling_fn = get_label_sampling_function(config.model.K)
 
-    def loss_fn(model, batch):
-        model_fn = mutils.get_model_fn(
-            model, train=train)  # get train/eval model
-        fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
-        blurred_batch = heat_forward_module(batch, fwd_steps).float()
-        less_blurred_batch = heat_forward_module(batch, fwd_steps-1).float()
-        noise = torch.randn_like(blurred_batch) * sigma
-        perturbed_data = noise + blurred_batch
-        diff = model_fn(perturbed_data, fwd_steps)
-        prediction = perturbed_data + diff
-        losses = (less_blurred_batch - prediction)**2
-        losses = torch.sum(losses.reshape(losses.shape[0], -1), dim=-1)
-        loss = torch.mean(losses)
-        return loss, losses, fwd_steps
+    if config.model.loss_type == 'risannen':
+        def loss_fn(model, batch):
+            model_fn = mutils.get_model_fn(
+                model, train=train)  # get train/eval model
+            fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
+            blurred_batch = heat_forward_module(batch, fwd_steps).float()
+            less_blurred_batch = heat_forward_module(batch, fwd_steps-1).float()
+            noise = torch.randn_like(blurred_batch) * sigma
+            perturbed_data = noise + blurred_batch
+            diff = model_fn(perturbed_data, fwd_steps)
+            prediction = perturbed_data + diff
+            losses = (less_blurred_batch - prediction)**2
+            losses = torch.sum(losses.reshape(losses.shape[0], -1), dim=-1)
+            loss = torch.mean(losses)
+            return loss, losses, fwd_steps
+    
+    elif config.model.loss_type == 'bansal':
+        def loss_fn(model, batch):
+            model_fn = mutils.get_model_fn(
+                model, train=train)
+            fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
+            blurred_batch = heat_forward_module(batch, fwd_steps).float()
+            reconstructed = model_fn(blurred_batch, fwd_steps)
+
+            # l1 norm of the difference between the reconstructed and the original image
+            losses = torch.abs(reconstructed - batch)
+            losses = torch.sum(losses.reshape(losses.shape[0], -1), dim=-1)
+            loss = torch.mean(losses)
+
+            return loss, losses, fwd_steps
 
     return loss_fn
 

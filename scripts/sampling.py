@@ -6,7 +6,7 @@ from scripts import datasets
 
 def get_sampling_fn_inverse_heat(config, initial_sample,
                                  intermediate_sample_indices, delta, device,
-                                 share_noise=False):
+                                 share_noise=False, degradation_operator=None):
     """ Returns our inverse heat process sampling function. 
     Arguments: 
     initial_sample: Pytorch Tensor with the initial draw from the prior p(u_K)
@@ -16,33 +16,59 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
     """
     K = config.model.K
 
-    def sampler(model):
+    if config.model.loss_type == 'risannen':
+        def sampler(model):
 
-        if share_noise:
-            noises = [torch.randn_like(initial_sample[0], dtype=torch.float)[None]
-                      for i in range(K)]
-        intermediate_samples_out = []
+            if share_noise:
+                noises = [torch.randn_like(initial_sample[0], dtype=torch.float)[None]
+                        for i in range(K)]
+            intermediate_samples_out = []
 
-        with torch.no_grad():
-            u = initial_sample.to(config.device).float()
-            if intermediate_sample_indices != None and K in intermediate_sample_indices:
-                intermediate_samples_out.append((u, u))
-            for i in range(K, 0, -1):
-                vec_fwd_steps = torch.ones(
-                    initial_sample.shape[0], device=device, dtype=torch.long) * i
-                # Predict less blurry mean
-                u_mean = model(u, vec_fwd_steps) + u
-                # Sampling step
-                if share_noise:
-                    noise = noises[i-1]
-                else:
-                    noise = torch.randn_like(u)
-                u = u_mean + noise*delta
-                # Save trajectory
-                if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
-                    intermediate_samples_out.append((u, u_mean))
+            with torch.no_grad():
+                u = initial_sample.to(config.device).float()
+                if intermediate_sample_indices != None and K in intermediate_sample_indices:
+                    intermediate_samples_out.append((u, u))
+                for i in range(K, 0, -1):
+                    vec_fwd_steps = torch.ones(
+                        initial_sample.shape[0], device=device, dtype=torch.long) * i
+                    # Predict less blurry mean
+                    u_mean = model(u, vec_fwd_steps) + u
+                    # Sampling step
+                    if share_noise:
+                        noise = noises[i-1]
+                    else:
+                        noise = torch.randn_like(u)
+                    u = u_mean + noise*delta
+                    # Save trajectory
+                    if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
+                        intermediate_samples_out.append((u, u_mean))
 
-            return u_mean, config.model.K, [u for (u, u_mean) in intermediate_samples_out]
+                return u_mean, config.model.K, [u for (u, u_mean) in intermediate_samples_out]
+    
+    elif config.model.loss_type == "bansal":
+        # sampler as described in Bansal et al. 2022 (Algorithm 2)
+        def sampler(model):
+            intermediate_samples_out = []
+            with torch.no_grad():
+                u = initial_sample.to(config.device).float()
+                if intermediate_sample_indices != None and K in intermediate_sample_indices:
+                    intermediate_samples_out.append((u, u))
+                for i in range(K, 0, -1):
+                    vec_fwd_steps = torch.ones(
+                        initial_sample.shape[0], device=device, dtype=torch.long) * i
+                    # predict reconstruction
+                    reconstructed = model(u, vec_fwd_steps)
+                    # update step-by-step reconstruction
+                    u = u - degradation_operator(reconstructed, vec_fwd_steps) + degradation_operator(reconstructed, vec_fwd_steps - 1)
+                    # make sure u is in floats
+                    u = u.float()
+
+                    # Save trajectory
+                    if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
+                        intermediate_samples_out.append((u, reconstructed))
+                
+                return u, config.model.K, [u for (u, reconstructed) in intermediate_samples_out]
+
     return sampler
 
 

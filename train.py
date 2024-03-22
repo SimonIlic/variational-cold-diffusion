@@ -98,7 +98,8 @@ def train(config, workdir):
     sampling_fn = sampling.get_sampling_fn_inverse_heat(config,
                                                         initial_sample, intermediate_sample_indices=list(
                                                             range(config.model.K+1)),
-                                                        delta=config.model.delta, device=config.device)
+                                                        delta=config.model.delta, device=config.device,
+                                                        degradation_operator=heat_forward_module)
 
     num_train_steps = config.training.n_iters
     logging.info("Starting training loop at step %d." % (initial_step,))
