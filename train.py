@@ -47,6 +47,10 @@ def train(config, workdir):
     Path(tb_dir).mkdir(parents=True, exist_ok=True)
     writer = tensorboard.SummaryWriter(tb_dir)
 
+    # export config to json
+    with open(os.path.join(workdir, "config.json"), "w") as f:
+        f.write(config.to_json_best_effort())
+
     # Initialize model
     model = mutils.create_model(config)
     optimizer = losses.get_optimizer(config, model.parameters())
