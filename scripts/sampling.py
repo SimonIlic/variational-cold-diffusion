@@ -63,8 +63,8 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     u = u.float()  # make sure u is in floats
 
                     # noise the reconstruction a bit for sampling variation
-                    noise = torch.randn_like(u)
-                    u = u + noise * delta
+                    noise = torch.randn_like(u) * delta + 1
+                    u = u * noise
 
                     # Save trajectory
                     if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
