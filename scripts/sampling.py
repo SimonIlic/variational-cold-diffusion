@@ -60,8 +60,11 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     reconstructed = model(u, vec_fwd_steps)
                     # update step-by-step reconstruction
                     u = u - degradation_operator(reconstructed, vec_fwd_steps) + degradation_operator(reconstructed, vec_fwd_steps - 1)
-                    # make sure u is in floats
-                    u = u.float()
+                    u = u.float()  # make sure u is in floats
+
+                    # noise the reconstruction a bit for sampling variation
+                    noise = torch.randn_like(u)
+                    u = u + noise * delta
 
                     # Save trajectory
                     if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
