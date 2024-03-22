@@ -45,6 +45,7 @@ def get_default_configs():
     model.K = 100
     model.sigma = 0.01
     model.delta = 1.25 * model.sigma  # 1.25 * sigma is magic number found to work best in original paper
+    model.fade = 1.0  # factor to fade in the degradation operator
     model.dropout = 0.1
     model.model_channels = 128  # Base amount of channels in the model
     model.channel_mult = (1, 2, 2)

@@ -9,26 +9,37 @@ from model_code import torch_dct
 
 class DCTBlur(nn.Module):
 
-    def __init__(self, blur_sigmas, image_size, device):
+    def __init__(self, blur_sigmas, fade_factor, image_size, device):
         super(DCTBlur, self).__init__()
+        self.fade_factor = fade_factor
         self.blur_sigmas = torch.tensor(blur_sigmas).to(device)
         freqs = np.pi*torch.linspace(0, image_size-1,
                                      image_size).to(device)/image_size
         self.frequencies_squared = freqs[:, None]**2 + freqs[None, :]**2
 
     def forward(self, x, fwd_steps):
+        # reshape sigmas for color images
         if len(x.shape) == 4:
             sigmas = self.blur_sigmas[fwd_steps][:, None, None, None]
         elif len(x.shape) == 3:
             sigmas = self.blur_sigmas[fwd_steps][:, None, None]
+        # convert sigma to t
         t = sigmas**2/2
-        dct_coefs = torch_dct.dct_2d(x, norm='ortho')
-        dct_coefs = dct_coefs * torch.exp(- self.frequencies_squared * t)
-        return torch_dct.idct_2d(dct_coefs, norm='ortho')
+    
+        dct_x = torch_dct.dct_2d(x, norm='ortho')
+        blurred_dct_x = dct_x * torch.exp(- self.frequencies_squared * t)
+        blurred_x =  torch_dct.idct_2d(blurred_dct_x, norm='ortho')
+
+        # fade to black
+        faded_blurred_x = blurred_x * self.fade_factor**t
+
+        return faded_blurred_x
+
+
 
 
 def create_forward_process_from_sigmas(config, sigmas, device):
-    forward_process_module = DCTBlur(sigmas, config.data.image_size, device)
+    forward_process_module = DCTBlur(sigmas, config.model.fade , config.data.image_size, device)
     return forward_process_module
 
 
