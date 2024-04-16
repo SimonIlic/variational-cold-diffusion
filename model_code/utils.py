@@ -4,6 +4,7 @@ import torch.nn as nn
 import logging
 import numpy as np
 from model_code.unet import UNetModel
+from model_code.diffusion_vae import DiffusionVAE
 from model_code import torch_dct
 
 
@@ -175,23 +176,31 @@ def neg_ELBO(config, trainloader, testloader, blur_module, sigma, delta, image_s
 
 def create_model(config, device_ids=None):
     """Create the model."""
-    model = UNetModel(config)
-    model = model.to(config.device)
-    model = torch.nn.DataParallel(model, device_ids=device_ids)
+    if config.model.type == 'diffusion':
+        model = UNetModel(config)
+        model = model.to(config.device)
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
+    elif config.model.type == 'vae':
+        print("Creating VAE model")
+        model = DiffusionVAE(config)
+        model = model.to(config.device)
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
+    else:
+        raise NotImplementedError("Model type not implemented")
     return model
 
 
 def get_model_fn(model, train=False):
     """A wrapper for using the model in eval or train mode"""
-    def model_fn(x, fwd_steps):
+    def model_fn(x, *args):
         """Args:
                 x: A mini-batch of input data.
                 fwd_steps: A mini-batch of conditioning variables for different levels.
         """
         if not train:
             model.eval()
-            return model(x, fwd_steps)
+            return model(x, *args)
         else:
             model.train()
-            return model(x, fwd_steps)
+            return model(x, *args)
     return model_fn
