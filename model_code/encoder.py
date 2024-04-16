@@ -75,7 +75,7 @@ class Encoder(nn.Module):
         z = self.reparameterize(mu, log_var)
         return z, mu, log_var
     
-    def sample(self):
+    def sample(self, batch_size):
         """Sample z from prior."""
-        z = torch.randn(self.latent_dim).to(self.config.device)
+        z = torch.randn(batch_size, self.latent_dim).to(self.config.device)
         return z, 0, 1

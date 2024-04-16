@@ -138,6 +138,7 @@ def train(config, workdir):
                 eval_loss, losses_batch, fwd_steps_batch = eval_step_fn(state, eval_batch)
                 eval_loss = eval_loss.detach()
             logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
+            logging.info("step: %d, train_loss: %.5e" % (step, loss.item()))
 
         # Save a checkpoint periodically
         if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
