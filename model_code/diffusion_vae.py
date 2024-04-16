@@ -21,5 +21,5 @@ class DiffusionVAE(nn.Module):
     
     def sample(self, x, t, z=None):
         if z is None:
-            z = self.encoder.sample()
+            z, _, _ = self.encoder.sample()
         return self.decoder(x, t, z), z

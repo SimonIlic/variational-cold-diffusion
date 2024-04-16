@@ -199,7 +199,7 @@ def get_model_fn(model, train=False, sample=False):
         """
         if not train:
             model.eval()
-            return model(x, *args) if not sample else model.sample(x, *args)
+            return model(x, *args) if not sample else model.module.sample(x, *args)
         else:
             model.train()
             return model(x, *args)
