@@ -42,8 +42,12 @@ def get_default_configs():
 
     # model
     config.model = model = ml_collections.ConfigDict()
+    model.type = 'diffusion'
+    model.loss_type = 'risannen'
     model.K = 200
     model.sigma = 0.01
+    model.delta = 1.25 * model.sigma  # 1.25 * sigma is magic number found to work best in original paper
+    model.fade = 1.0  # factor to fade in the degradation operator
     model.dropout = 0.1
     model.model_channels = 128
     model.channel_mult = (1, 2, 2, 2)
@@ -68,6 +72,11 @@ def get_default_configs():
                                              np.log(model.blur_sigma_max), model.K))
     model.blur_schedule = np.array(
         [0] + list(model.blur_schedule))  # Add the k=0 timestep
+    
+    # encoder model
+    config.model.encoder = encoder = ml_collections.ConfigDict()
+    encoder.latent_dim = 10
+    encoder.hidden_dims = [32, 64, 128, 256, 512]
 
     # optimization
     config.optim = optim = ml_collections.ConfigDict()

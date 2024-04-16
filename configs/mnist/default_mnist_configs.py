@@ -42,6 +42,8 @@ def get_default_configs():
 
     # model
     config.model = model = ml_collections.ConfigDict()
+    model.type = 'vae'
+    model.loss_type = 'risannen'
     model.K = 100
     model.sigma = 0.01
     model.delta = 1.25 * model.sigma  # 1.25 * sigma is magic number found to work best in original paper
@@ -70,6 +72,11 @@ def get_default_configs():
                                              np.log(model.blur_sigma_max), model.K))
     model.blur_schedule = np.array(
         [0] + list(model.blur_schedule))  # Add the k=0 timestep
+    
+    # encoder model
+    config.model.encoder = encoder = ml_collections.ConfigDict()
+    encoder.latent_dim = 3
+    encoder.hidden_dims = [32, 64, 128, 256, 512]
 
     # optimization
     config.optim = optim = ml_collections.ConfigDict()
