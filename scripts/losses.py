@@ -64,24 +64,43 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
     label_sampling_fn = get_label_sampling_function(config.model.K)
 
     if config.model.type == 'vae':
-        def loss_fn(model, batch):
-            model_fn = mutils.get_model_fn(
-                model, train=train)
-            fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
-            blurred_batch = heat_forward_module(batch, fwd_steps).float()
-            less_blurred_batch = heat_forward_module(batch, fwd_steps-1).float()
-            diff, z, mu, log_var = model_fn(less_blurred_batch, blurred_batch, fwd_steps)
+        if config.model.loss_type == 'risannen':
+            def loss_fn(model, batch):
+                model_fn = mutils.get_model_fn(
+                    model, train=train)
+                fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
+                blurred_batch = heat_forward_module(batch, fwd_steps).float()
+                less_blurred_batch = heat_forward_module(batch, fwd_steps-1).float()
+                diff, z, mu, log_var = model_fn(less_blurred_batch, blurred_batch, fwd_steps)
 
-            prediction = blurred_batch + diff
+                prediction = blurred_batch + diff
 
-            reconstruction_loss = (less_blurred_batch - prediction)**2
-            reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
+                reconstruction_loss = (less_blurred_batch - prediction)**2
+                reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
 
-            kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+                kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
 
-            loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
+                loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
 
-            return loss, (reconstruction_loss, kl_div), fwd_steps
+                return loss, (reconstruction_loss, kl_div), fwd_steps
+        elif config.model.loss_type == 'bansal':
+            def loss_fn(model, batch):
+                model_fn = mutils.get_model_fn(
+                    model, train=train)
+                fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
+                blurred_batch = heat_forward_module(batch, fwd_steps).float()
+                reconstructed, z, mu , log_var = model_fn(batch, blurred_batch, fwd_steps)
+
+                # l1 norm of the difference between the reconstructed and the original image
+                reconstruction_loss = torch.abs(reconstructed - batch)
+                reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
+
+                kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+
+                loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
+
+                return loss, (reconstruction_loss, kl_div), fwd_steps
+
 
     elif config.model.loss_type == 'risannen':
         def loss_fn(model, batch):

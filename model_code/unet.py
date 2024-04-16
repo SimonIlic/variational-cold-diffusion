@@ -635,7 +635,7 @@ class UNetModel(nn.Module):
                         padding=1, padding_mode=self.padding_mode)),
         )
 
-    def forward(self, x, timesteps, z):
+    def forward(self, x, timesteps, z=None):
         """
         Apply the model to an input batch.
 
@@ -648,7 +648,8 @@ class UNetModel(nn.Module):
         emb = self.time_embed(timestep_embedding(
             timesteps, self.model_channels))
 
-        emb = emb + self.z_emb(z)
+        if z is not None:
+            emb = emb + self.z_emb(z)
 
         h = x.type(self.dtype)
         for module in self.input_blocks:
