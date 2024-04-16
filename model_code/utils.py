@@ -190,7 +190,7 @@ def create_model(config, device_ids=None):
     return model
 
 
-def get_model_fn(model, train=False):
+def get_model_fn(model, train=False, sample=False):
     """A wrapper for using the model in eval or train mode"""
     def model_fn(x, *args):
         """Args:
@@ -199,7 +199,7 @@ def get_model_fn(model, train=False):
         """
         if not train:
             model.eval()
-            return model(x, *args)
+            return model(x, *args) if not sample else model.sample(x, *args)
         else:
             model.train()
             return model(x, *args)

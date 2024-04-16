@@ -57,7 +57,7 @@ def train(config, workdir):
     ema = ExponentialMovingAverage(
         model.parameters(), decay=config.model.ema_rate)
     state = dict(optimizer=optimizer, model=model, step=0, ema=ema)
-    model_evaluation_fn = mutils.get_model_fn(model, train=False)
+    model_evaluation_fn = mutils.get_model_fn(model, train=False, sample=True)
 
     # Create checkpoints directory
     checkpoint_dir = os.path.join(workdir, "checkpoints")

@@ -31,7 +31,7 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     vec_fwd_steps = torch.ones(
                         initial_sample.shape[0], device=device, dtype=torch.long) * i
                     # Predict less blurry mean
-                    u_mean = model.sample(u, vec_fwd_steps) + u
+                    u_mean = model(u, vec_fwd_steps) + u
 
                     # Sampling step (adding sampling noise)
                     if share_noise:
