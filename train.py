@@ -7,6 +7,7 @@ from model_code import utils as mutils
 from model_code.ema import ExponentialMovingAverage
 from scripts import datasets
 import torch
+import wandb
 from torch.utils import tensorboard
 from scripts import utils
 from absl import app
@@ -38,6 +39,9 @@ def train(config, workdir):
 
     if config.device == torch.device('cpu'):
         logging.info("RUNNING ON CPU")
+
+    # Set up logging
+    track_experiment(config)
 
     # Create directory for saving intermediate samples
     sample_dir = os.path.join(workdir, "samples")
@@ -118,6 +122,7 @@ def train(config, workdir):
         loss, losses_batch, fwd_steps_batch = train_step_fn(state, batch)
 
         writer.add_scalar("training_loss", loss.item(), step)
+        wandb.log({"training_loss": loss.item(), "step": step})
 
         # Save a temporary checkpoint to resume training if training is stopped
         if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
@@ -139,6 +144,7 @@ def train(config, workdir):
                 eval_loss = eval_loss.detach()
             logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
             logging.info("step: %d, train_loss: %.5e" % (step, loss.item()))
+            wandb.log({"eval_loss": eval_loss.item(), "step": step})
 
         # Save a checkpoint periodically
         if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
@@ -168,6 +174,14 @@ def train(config, workdir):
             utils.save_gif(this_sample_dir, model_predictions, "model_predictions.gif")
             utils.save_video(this_sample_dir, model_predictions, "model_predictions.mp4")
 
+def track_experiment(config):
+    wandb.init(
+    # set the wandb project where this run will be logged
+    project="my-awesome-project",
+
+    # track hyperparameters and run metadata
+    config=config
+    )
 
 if __name__ == "__main__":
     app.run(main)

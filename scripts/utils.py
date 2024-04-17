@@ -59,7 +59,7 @@ def save_checkpoint(ckpt_dir, state):
     torch.save(saved_state, ckpt_dir)
 
 
-def save_video(save_dir, samples):
+def save_video(save_dir, samples, name="process.mp4"):
     """ Saves a video from Pytorch tensor 'samples'. Arguments:
     samples: Tensor of shape: (video_length, n_channels, height, width)
     save_dir: Directory where to save the video"""
@@ -75,7 +75,7 @@ def save_video(save_dir, samples):
         imgs.append(image_grid)
     #video_size = tuple(reversed(tuple(5*s for s in imgs[0].shape[:2])))
     video_size = tuple(reversed(tuple(s for s in imgs[0].shape[:2])))
-    writer = cv2.VideoWriter(os.path.join(save_dir, "process.mp4"), cv2.VideoWriter_fourcc(*'mp4v'),
+    writer = cv2.VideoWriter(os.path.join(save_dir, name), cv2.VideoWriter_fourcc(*'mp4v'),
                              30, video_size)
     for i in range(len(imgs)):
         image = cv2.resize(imgs[i], video_size, fx=0,
