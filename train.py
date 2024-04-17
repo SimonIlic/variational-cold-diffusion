@@ -177,10 +177,10 @@ def train(config, workdir):
 def track_experiment(config):
     wandb.init(
     # set the wandb project where this run will be logged
-    project="my-awesome-project",
+    project="diffusion-vae",
 
     # track hyperparameters and run metadata
-    config=config
+    config=config.to_json_best_effort(),
     )
 
 if __name__ == "__main__":
