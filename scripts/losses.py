@@ -71,8 +71,11 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                 fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
                 blurred_batch = heat_forward_module(batch, fwd_steps).float()
                 less_blurred_batch = heat_forward_module(batch, fwd_steps-1).float()
-                diff, z, mu, log_var = model_fn(less_blurred_batch, blurred_batch, fwd_steps)
 
+                noise = torch.randn_like(blurred_batch) * sigma
+                perturbed_data = blurred_batch + noise
+
+                diff, z, mu, log_var = model_fn(less_blurred_batch, perturbed_data, fwd_steps)
                 prediction = blurred_batch + diff
 
                 reconstruction_loss = (less_blurred_batch - prediction)**2
