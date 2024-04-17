@@ -180,7 +180,7 @@ def track_experiment(config):
     project="diffusion-vae",
 
     # track hyperparameters and run metadata
-    config=config.to_json_best_effort(),
+    config=config.to_dict(),
     )
 
 if __name__ == "__main__":
