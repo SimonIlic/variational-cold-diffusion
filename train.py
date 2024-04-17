@@ -153,7 +153,7 @@ def train(config, workdir):
             logging.info("Sampling...")
             ema.store(model.parameters())
             ema.copy_to(model.parameters())
-            sample, n, intermediate_samples = sampling_fn(model_evaluation_fn)
+            sample, n, intermediate_samples, model_predictions = sampling_fn(model_evaluation_fn)
             ema.restore(model.parameters())
             this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
             Path(this_sample_dir).mkdir(parents=True, exist_ok=True)
@@ -161,8 +161,12 @@ def train(config, workdir):
             utils.save_png(this_sample_dir, sample, "final.png")
             if initial_sample != None:
                 utils.save_png(this_sample_dir, initial_sample, "init.png")
+            # save sample trajectory
             utils.save_gif(this_sample_dir, intermediate_samples)
             utils.save_video(this_sample_dir, intermediate_samples)
+            # save model prediction trajectory
+            utils.save_gif(this_sample_dir, model_predictions, "model_predictions.gif")
+            utils.save_video(this_sample_dir, model_predictions, "model_predictions.mp4")
 
 
 if __name__ == "__main__":

@@ -23,7 +23,6 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                 noises = [torch.randn_like(initial_sample[0], dtype=torch.float)[None]
                         for i in range(K)]
             intermediate_samples_out = []
-
             with torch.no_grad():
                 u = initial_sample.to(config.device).float()
                 if intermediate_sample_indices != None and K in intermediate_sample_indices:
@@ -32,7 +31,8 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     vec_fwd_steps = torch.ones(
                         initial_sample.shape[0], device=device, dtype=torch.long) * i
                     # Predict less blurry mean
-                    u_mean = model(u, vec_fwd_steps) + u
+                    diff = model(u, vec_fwd_steps)
+                    u_mean = u + diff
                     # Sampling step
                     if share_noise:
                         noise = noises[i-1]
@@ -41,9 +41,9 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     u = u_mean + noise*delta
                     # Save trajectory
                     if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
-                        intermediate_samples_out.append((u, u_mean))
+                        intermediate_samples_out.append((u, diff))
 
-                return u_mean, config.model.K, [u for (u, u_mean) in intermediate_samples_out]
+                return u_mean, config.model.K, [u for (u, diff) in intermediate_samples_out], [diff for (u, diff) in intermediate_samples_out]
     
     elif config.model.loss_type == "bansal":
         # sampler as described in Bansal et al. 2022 (Algorithm 2)
@@ -70,7 +70,7 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
                         intermediate_samples_out.append((u, reconstructed))
                 
-                return u, config.model.K, [u for (u, reconstructed) in intermediate_samples_out]
+                return u, config.model.K, [u for (u, reconstructed) in intermediate_samples_out], [reconstructed for (u, reconstructed) in intermediate_samples_out]
 
     return sampler
 
