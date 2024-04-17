@@ -132,19 +132,27 @@ def train(config, workdir):
         # Report the loss on an evaluation dataset periodically
         if step % config.training.eval_freq == 0:
             logging.info("Starting evaluation")
-            # Use 25 batches for test-set evaluation, arbitrary choice
-            N_evals = 25
+            # Use 1 batches for test-set evaluation, arbitrary choice
+            N_evals = 1
             for i in range(N_evals):
                 try:
                     eval_batch = next(eval_iter)[0].to(config.device).float()
                 except StopIteration:  # Start new epoch
                     eval_iter = iter(testloader)
                     eval_batch = next(eval_iter)[0].to(config.device).float()
-                eval_loss, losses_batch, fwd_steps_batch = eval_step_fn(state, eval_batch)
+                eval_loss, eval_losses_batch, fwd_steps_batch = eval_step_fn(state, eval_batch)
                 eval_loss = eval_loss.detach()
             logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
             logging.info("step: %d, train_loss: %.5e" % (step, loss.item()))
             wandb.log({"eval_loss": eval_loss.item(), "step": step})
+
+            # also save kl - reconstruction divide
+            train_reconstruction_loss = torch.mean(losses_batch[0])
+            train_kl_div = torch.mean(losses_batch[1])
+            eval_reconstruction_loss = torch.mean(eval_losses_batch[0])
+            eval_kl_div = torch.mean(eval_losses_batch[1])
+            wandb.log({"train_reconstruction_loss": train_reconstruction_loss.item(), "train_kl_div": train_kl_div.item(), "eval_reconstruction_loss": eval_reconstruction_loss.item(), "eval_kl_div": eval_kl_div.item(), "step": step})
+
 
         # Save a checkpoint periodically
         if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
