@@ -99,8 +99,7 @@ def train(config, workdir):
 
     # Building sampling functions
     delta = config.model.delta
-    initial_sample, _ = sampling.get_initial_sample(
-        config, heat_forward_module, delta)
+    initial_sample, _ = sampling.get_zero_initial_sample(config)
     sampling_fn = sampling.get_sampling_fn_inverse_heat(config,
                                                         initial_sample, intermediate_sample_indices=list(
                                                             range(config.model.K+1)),

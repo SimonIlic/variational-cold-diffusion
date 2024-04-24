@@ -138,3 +138,8 @@ def get_initial_sample(config, forward_heat_module, delta, batch_size=None):
     initial_sample = forward_heat_module(initial_sample,
                                          config.model.K * torch.ones(initial_sample.shape[0], dtype=torch.long).to(config.device))
     return initial_sample, original_images
+
+def get_zero_initial_sample(config):
+    """Take a draw from the prior p(u_K), i.e. zero vectors"""
+    initial_sample = torch.zeros(config.evaluate.batch_size, config.data.n_channels, config.data.image_size, config.data.image_size).to(config.device)
+    return initial_sample
