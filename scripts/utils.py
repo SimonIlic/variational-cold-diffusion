@@ -10,6 +10,7 @@ from model_code import utils as mutils
 from scripts import losses
 from model_code.ema import ExponentialMovingAverage
 import pickle
+import random
 
 
 def restore_checkpoint(ckpt_dir, state, device):
@@ -219,3 +220,15 @@ def load_model_from_checkpoint_dir(config, checkpoint_dir):
     model = state['model']
     state['ema'].copy_to(model.parameters())
     return model
+
+def seed_everything(seed=0):
+    """Seed all random number generators"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
+    logging.info("Seeded everything with seed {}".format(seed))
