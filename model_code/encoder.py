@@ -45,6 +45,7 @@ class Encoder(nn.Module):
                     conv_nd(2, in_channels, h_dim, kernel_size=3, stride=2, padding=1),
                     normalization(h_dim),
                     nn.SiLU(),
+                    nn.Dropout(config.model.dropout)
                 )
             )
             in_channels = h_dim
