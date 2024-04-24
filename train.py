@@ -42,6 +42,8 @@ def train(config, workdir):
 
     # Set up logging
     track_experiment(config)
+    # Seed everything
+    utils.seed_everything(config.seed)
 
     # Create directory for saving intermediate samples
     sample_dir = os.path.join(workdir, "samples")
