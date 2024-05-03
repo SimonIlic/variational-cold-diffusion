@@ -55,7 +55,7 @@ def optimization_manager(config):
 
 
 def get_label_sampling_function(K):
-    return lambda batch_size, device: torch.randint(1, K, (batch_size,), device=device)
+    return lambda batch_size, device: torch.randint(1, K+1, (batch_size,), device=device)
 
 
 def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module):
