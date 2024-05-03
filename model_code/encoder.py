@@ -52,8 +52,10 @@ class Encoder(nn.Module):
             in_channels = h_dim
 
         self.encoder = nn.Sequential(*modules)
-        self.fc_mu = linear(hidden_dims[-1], latent_dim)
-        self.fc_var = linear(hidden_dims[-1], latent_dim)
+
+        # encoder should downsample upto a 2x2 image, hence fc is 4 * h_dim
+        self.fc_mu = linear(hidden_dims[-1] * 4, latent_dim)
+        self.fc_var = linear(hidden_dims[-1] * 4, latent_dim)
     
     def encode(self, x):
         result = self.encoder(x)
