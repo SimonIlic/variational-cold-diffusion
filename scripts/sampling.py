@@ -63,8 +63,8 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     u = u.float()  # make sure u is in floats
 
                     # noise the reconstruction a bit for sampling variation
-                    noise = torch.randn_like(u) * delta + 1
-                    u = u * noise
+                    noise = torch.randn_like(u) * delta
+                    u = u + noise
 
                     # Save trajectory
                     if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
@@ -141,5 +141,5 @@ def get_initial_sample(config, forward_heat_module, delta, batch_size=None):
 
 def get_zero_initial_sample(config):
     """Take a draw from the prior p(u_K), i.e. zero vectors"""
-    initial_sample = torch.zeros(config.evaluate.batch_size, config.data.n_channels, config.data.image_size, config.data.image_size).to(config.device)
+    initial_sample = torch.zeros(config.eval.batch_size, config.data.num_channels, config.data.image_size, config.data.image_size).to(config.device)
     return initial_sample
