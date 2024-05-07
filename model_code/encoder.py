@@ -26,8 +26,6 @@ class Encoder(nn.Module):
         self.hidden_dims = hidden_dims = config.model.encoder.hidden_dims
         self.base_dim = base_dim = hidden_dims[0]
 
-        self.blur_sigmas = torch.tensor(config.model.blur_schedule).to(config.device)
-
         self.img_size = img_size = config.data.image_size
 
         in_channels = config.data.num_channels * 2 + 1  # x_t, x_{t+1}, t
@@ -71,8 +69,8 @@ class Encoder(nn.Module):
         eps = torch.randn_like(std)
         return eps * std + mu
     
-    def forward(self, x_t, x_tp1, t):
-        t_embed = self.time_embed(timestep_encoding(self.blur_sigmas[t], self.base_dim)).view(-1, self.img_size, self.img_size).unsqueeze(1)
+    def forward(self, x_t, x_tp1, scales):
+        t_embed = self.time_embed(timestep_encoding(scales, self.base_dim)).view(-1, self.img_size, self.img_size).unsqueeze(1)
         
         x = torch.cat([self.data_embed(x_t), self.data_embed(x_tp1), t_embed], dim=1)
         mu, log_var = self.encode(x)

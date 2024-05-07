@@ -471,7 +471,6 @@ class UNetModel(nn.Module):
         self.use_scale_shift_norm = use_scale_shift_norm = config.model.use_scale_shift_norm
         self.resblock_updown = resblock_updown = config.model.resblock_updown
         self.padding_mode = 'zeros'
-        self.blur_sigmas = th.tensor(config.model.blur_schedule).to(config.device)
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
             linear(self.model_channels, time_embed_dim),
@@ -636,7 +635,7 @@ class UNetModel(nn.Module):
                         padding=1, padding_mode=self.padding_mode)),
         )
 
-    def forward(self, x, timesteps, z=None):
+    def forward(self, x, scales, z=None):
         """
         Apply the model to an input batch.
 
@@ -647,7 +646,7 @@ class UNetModel(nn.Module):
         """
         hs = []
         emb = self.time_embed(timestep_encoding(
-            self.blur_sigmas[timesteps], self.model_channels))
+            scales, self.model_channels))
 
         if z is not None:
             emb = emb + self.z_emb(z)
