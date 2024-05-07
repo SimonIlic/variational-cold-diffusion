@@ -10,6 +10,9 @@ from torchvision import transforms, datasets
 import torch
 from PIL import Image
 
+import torch.multiprocessing as mp
+mp.set_start_method('spawn', force=True)
+
 
 class UniformDequantize(object):
     def __init__(self):
