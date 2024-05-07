@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 import logging
+import numpy as np
+import matplotlib.pyplot as plt
 from scripts import losses
 from scripts import sampling
 from model_code import utils as mutils
@@ -125,6 +127,37 @@ def train(config, workdir):
         writer.add_scalar("training_loss", loss.item(), step)
         wandb.log({"training_loss": loss.item(), "step": step})
 
+        if step % config.training.eval_freq == 0:
+            # average loss per forward step
+            if config.model.type == 'vae':
+                reconstruction_loss, kl_div = losses_batch
+            else:
+                reconstruction_loss = losses_batch
+                kl_div = torch.zeros_like(reconstruction_loss)
+                print("HERE")
+            
+            scale_loss = np.zeros(len(scales))
+            for i, scale in enumerate(fwd_steps_batch):
+                loss_at_scale = reconstruction_loss[i].item() + kl_div[i].item()
+                scale_loss[scale] = loss_at_scale
+                pooled_losses[scale] += loss_at_scale
+            
+            # plot bar chart of loss at each scale
+            plt.bar(range(len(scales)), scale_loss)
+            plt.xlabel("Scale")
+            plt.ylabel("Loss")
+            plt.title("Loss at each scale")
+            plt.savefig(os.path.join(workdir, "loss_at_each_scale.png"))
+            plt.close()
+
+            plt.bar(range(len(scales)), pooled_losses)
+            plt.xlabel("Scale")
+            plt.ylabel("Loss")
+            plt.title("Pooled loss at each scale")
+            plt.savefig(os.path.join(workdir, "pooled_loss_at_each_scale.png"))
+            plt.close()
+
+
         # Save a temporary checkpoint to resume training if training is stopped
         if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
             logging.info("Saving temporary checkpoint")
@@ -147,12 +180,14 @@ def train(config, workdir):
             logging.info("step: %d, train_loss: %.5e" % (step, loss.item()))
             wandb.log({"eval_loss": eval_loss.item(), "step": step})
 
-            # also save kl - reconstruction divide
-            train_reconstruction_loss = torch.mean(losses_batch[0])
-            train_kl_div = torch.mean(losses_batch[1])
-            eval_reconstruction_loss = torch.mean(eval_losses_batch[0])
-            eval_kl_div = torch.mean(eval_losses_batch[1])
-            wandb.log({"train_reconstruction_loss": train_reconstruction_loss.item(), "train_kl_div": train_kl_div.item(), "eval_reconstruction_loss": eval_reconstruction_loss.item(), "eval_kl_div": eval_kl_div.item(), "step": step})
+            if config.model.type == 'vae':
+                # also save kl - reconstruction divide
+                train_reconstruction_loss = torch.mean(losses_batch[0])
+                train_kl_div = torch.mean(losses_batch[1])
+                eval_reconstruction_loss = torch.mean(eval_losses_batch[0])
+                eval_kl_div = torch.mean(eval_losses_batch[1])
+                wandb.log({"train_reconstruction_loss": train_reconstruction_loss.item(), "train_kl_div": train_kl_div.item(), "eval_reconstruction_loss": eval_reconstruction_loss.item(), "eval_kl_div": eval_kl_div.item(), "step": step})
+
 
 
         # Save a checkpoint periodically
