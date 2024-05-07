@@ -20,7 +20,7 @@ flags.mark_flags_as_required(["workdir", "config", "checkpoint"])
 flags.DEFINE_integer("save_sample_freq", 1,
                      "How often to save samples for output videos?")
 flags.DEFINE_float(
-    "delta", 0.01, "The standard deviation of noise to add at each step with predicted reverse blur")
+    "delta", 0.0, "The standard deviation of noise to add at each step with predicted reverse blur")
 flags.DEFINE_integer(
     "batch_size", None, "Batch size of sampled images. Defaults to the training batch size")
 flags.DEFINE_bool("same_init", False,
@@ -46,7 +46,7 @@ def main(argv):
 
 
 def sample(config, workdir, checkpoint, save_sample_freq=1,
-           delta=None, batch_size=None, share_noise=False, same_init=False):
+           delta=0, batch_size=None, share_noise=False, same_init=False):
 
     if batch_size == None:
         batch_size = config.training.batch_size
@@ -59,7 +59,7 @@ def sample(config, workdir, checkpoint, save_sample_freq=1,
         checkpoint_dir = os.path.join(workdir, "checkpoints-meta")
         model = utils.load_model_from_checkpoint_dir(config, checkpoint_dir)
 
-    model_fn = mutils.get_model_fn(model, train=False)
+    model_fn = mutils.get_model_fn(model, train=False, sample=True)
     logging.info("Loaded model from {}".format(checkpoint_dir))
     logging.info("Running on {}".format(config.device))
 
@@ -85,7 +85,7 @@ def sample(config, workdir, checkpoint, save_sample_freq=1,
 
     # Get smapling function and save directory
     sampling_fn = sampling.get_sampling_fn_inverse_heat(config, initial_sample,
-                                                        intermediate_sample_indices, delta, config.device, share_noise=share_noise)
+                                                        intermediate_sample_indices, delta, config.device, share_noise=share_noise, degradation_operator=heat_forward_module)
     this_sample_dir = os.path.join(this_sample_dir, "delta_{}".format(delta))
     if same_init:
         this_sample_dir += "_same_init"
@@ -95,7 +95,7 @@ def sample(config, workdir, checkpoint, save_sample_freq=1,
     Path(this_sample_dir).mkdir(parents=True, exist_ok=True)
 
     logging.info("Do sampling")
-    sample, n, intermediate_samples = sampling_fn(model_fn)
+    sample, n, intermediate_samples, model_predictions = sampling_fn(model_fn)
 
     # Save results
     utils.save_tensor_list(this_sample_dir, intermediate_samples, "samples.np")
@@ -104,6 +104,9 @@ def sample(config, workdir, checkpoint, save_sample_freq=1,
     utils.save_png(this_sample_dir, initial_sample, "init.png")
     utils.save_gif(this_sample_dir, intermediate_samples)
     utils.save_video(this_sample_dir, intermediate_samples)
+    # save model prediction trajectory
+    utils.save_gif(this_sample_dir, model_predictions, "model_predictions.gif")
+    utils.save_video(this_sample_dir, model_predictions, "model_predictions.mp4")
 
 
 def sample_interpolate(config, workdir, checkpoint,
