@@ -107,6 +107,30 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
 
                 return loss, (reconstruction_loss, kl_div), fwd_steps
 
+        elif config.model.loss_type == 'variable_t':
+            def loss_fn(model, batch):
+                model_fn = mutils.get_model_fn(
+                    model, train=train)
+                fwd_steps = np.random.randint(1, config.model.K + 1, batch.shape[0])
+                target_steps = np.random.randint(np.zeros_like(fwd_steps), fwd_steps)
+
+                scales = blur_schedule[fwd_steps]
+                target_scales = blur_schedule[target_steps]
+
+                blurred_batch = heat_forward_module(batch, fwd_steps).float()
+                target_batch = heat_forward_module(batch, target_steps).float()
+                reconstructed, z, mu , log_var = model_fn(target_batch, blurred_batch, scales - target_scales)
+
+                # l1 norm of the difference between the reconstructed and the original image
+                reconstruction_loss = torch.abs(reconstructed - target_batch)
+                reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
+
+                kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+
+                loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
+
+                return loss, (reconstruction_loss, kl_div), fwd_steps
+
 
     elif config.model.loss_type == 'risannen':
         def loss_fn(model, batch):

@@ -15,6 +15,7 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
     share_noise: Whether to use the same noises for all elements in the batch
     """
     K = config.model.K
+    blur_schedule = config.model.blur_schedule
             
     if config.model.loss_type == 'risannen':
         def sampler(model):
@@ -30,8 +31,9 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                 for i in range(K, 0, -1):
                     vec_fwd_steps = torch.ones(
                         initial_sample.shape[0], device=device, dtype=torch.long) * i
+                    scales = blur_schedule[vec_fwd_steps]
                     # Predict less blurry mean
-                    diff = model(u, vec_fwd_steps)
+                    diff = model(u, scales)
                     u_mean = u + diff
                     # Sampling step
                     if share_noise:
@@ -45,7 +47,7 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
 
                 return u_mean, config.model.K, [u for (u, diff) in intermediate_samples_out], [diff for (u, diff) in intermediate_samples_out]
     
-    elif config.model.loss_type == "bansal":
+    elif config.model.loss_type == "bansal" or config.model.loss_type == "variable_t":
         # sampler as described in Bansal et al. 2022 (Algorithm 2)
         def sampler(model):
             intermediate_samples_out = []
@@ -56,8 +58,9 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                 for i in range(K, 0, -1):
                     vec_fwd_steps = torch.ones(
                         initial_sample.shape[0], device=device, dtype=torch.long) * i
+                    scales = blur_schedule[vec_fwd_steps]
                     # predict reconstruction
-                    reconstructed = model(u, vec_fwd_steps)
+                    reconstructed = model(u, scales)
                     # update step-by-step reconstruction
                     u = u - degradation_operator(reconstructed, vec_fwd_steps) + degradation_operator(reconstructed, vec_fwd_steps - 1)
                     u = u.float()  # make sure u is in floats
