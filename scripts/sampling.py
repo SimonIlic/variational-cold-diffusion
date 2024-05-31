@@ -15,7 +15,7 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
     share_noise: Whether to use the same noises for all elements in the batch
     """
     K = config.model.K
-    blur_schedule = config.model.blur_schedule
+    blur_schedule = torch.tensor(config.model.blur_schedule, device=config.device)
             
     if config.model.loss_type == 'risannen':
         def sampler(model):

@@ -5,42 +5,49 @@ import logging
 import numpy as np
 from model_code.unet import UNetModel
 from model_code.diffusion_vae import DiffusionVAE
-from model_code import torch_dct
+import torch_dct
 
 
 class DCTBlur(nn.Module):
 
-    def __init__(self, blur_sigmas, fade_factor, image_size, device):
+    def __init__(self, max_blur, image_size, device, min_scale=0.001) :
         super(DCTBlur, self).__init__()
-        self.fade_factor = fade_factor
-        self.blur_sigmas = torch.tensor(blur_sigmas).to(device)
         freqs = np.pi*torch.linspace(0, image_size-1,
                                      image_size).to(device)/image_size
         self.frequencies_squared = freqs[:, None]**2 + freqs[None, :]**2
+        self.max_blur = max_blur
+        self.min_scale = min_scale
 
-    def forward(self, x, fwd_steps):
+    def schedule(self, t):
+        return self.max_blur * torch.sin(t * torch.pi / 2)**2
+
+    def forward(self, x, t):
+        # assert dtype is float64 in production setting
+        if "mps" not in str(x.device): assert x.dtype == torch.float64
+
         # reshape sigmas for color images
         if len(x.shape) == 4:
-            sigmas = self.blur_sigmas[fwd_steps][:, None, None, None]
+            sigmas = self.schedule(t)[:, None, None, None]
+            t = t[:, None, None, None]
         elif len(x.shape) == 3:
-            sigmas = self.blur_sigmas[fwd_steps][:, None, None]
-        # convert sigma to t
-        t = sigmas**2/2
+            sigmas = self.schedule(t)[:, None, None]
+            t = t[:, None, None]
+        
+        # convert sigma to tau
+        tau = sigmas**2/2
     
         dct_x = torch_dct.dct_2d(x, norm='ortho')
-        blurred_dct_x = dct_x * torch.exp(- self.frequencies_squared * t)
+        blurred_dct_x = dct_x * (torch.exp(- self.frequencies_squared * tau) * (1 - self.min_scale) + self.min_scale)
         blurred_x =  torch_dct.idct_2d(blurred_dct_x, norm='ortho')
 
         # fade to black
-        faded_blurred_x = blurred_x * self.fade_factor**t
+        faded_blurred_x = blurred_x * (1 - t)**0.5
 
         return faded_blurred_x
 
 
-
-
 def create_forward_process_from_sigmas(config, sigmas, device):
-    forward_process_module = DCTBlur(sigmas, config.model.fade , config.data.image_size, device)
+    forward_process_module = DCTBlur(config.model.blur_sigma_max , config.data.image_size, device)
     return forward_process_module
 
 
@@ -190,7 +197,7 @@ def create_model(config, device_ids=None):
     return model
 
 
-def get_model_fn(model, train=False, sample=False):
+def get_model_fn(model, train=False, sample=False, z=None):
     """A wrapper for using the model in eval or train mode"""
     def model_fn(x, *args):
         """Args:

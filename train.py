@@ -127,37 +127,6 @@ def train(config, workdir):
         writer.add_scalar("training_loss", loss.item(), step)
         wandb.log({"training_loss": loss.item(), "step": step})
 
-        if step % config.training.eval_freq == 0:
-            # average loss per forward step
-            if config.model.type == 'vae':
-                reconstruction_loss, kl_div = losses_batch
-            else:
-                reconstruction_loss = losses_batch
-                kl_div = torch.zeros_like(reconstruction_loss)
-                print("HERE")
-            
-            scale_loss = np.zeros(len(scales))
-            for i, scale in enumerate(fwd_steps_batch):
-                loss_at_scale = reconstruction_loss[i].item() + kl_div[i].item()
-                scale_loss[scale] = loss_at_scale
-                pooled_losses[scale] += loss_at_scale
-            
-            # plot bar chart of loss at each scale
-            plt.bar(range(len(scales)), scale_loss)
-            plt.xlabel("Scale")
-            plt.ylabel("Loss")
-            plt.title("Loss at each scale")
-            plt.savefig(os.path.join(workdir, "loss_at_each_scale.png"))
-            plt.close()
-
-            plt.bar(range(len(scales)), pooled_losses)
-            plt.xlabel("Scale")
-            plt.ylabel("Loss")
-            plt.title("Pooled loss at each scale")
-            plt.savefig(os.path.join(workdir, "pooled_loss_at_each_scale.png"))
-            plt.close()
-
-
         # Save a temporary checkpoint to resume training if training is stopped
         if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
             logging.info("Saving temporary checkpoint")
