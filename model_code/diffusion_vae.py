@@ -15,11 +15,11 @@ class DiffusionVAE(nn.Module):
 
     def forward(self, x_t, x_tp1, scales):
         # sample z from q(z|x_t, x_tp1, t)
-        z, mu, log_var = self.encoder(x_t, x_tp1, scales)
+        z, latent_params = self.encoder(x_t, x_tp1, scales)
         # decode x_t from xtp1, z and t
-        return self.decoder(x_tp1, scales, z), z, mu, log_var
+        return self.decoder(x_tp1, scales, z), z, latent_params
     
     def sample(self, x, t, z=None):
         if z is None:
-            z, _, _ = self.encoder.sample(x.shape[0])
+            z, _ = self.encoder.sample(x.shape[0])
         return self.decoder(x, t, z)

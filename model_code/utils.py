@@ -22,9 +22,6 @@ class DCTBlur(nn.Module):
         return self.max_blur * torch.sin(t * torch.pi / 2)**2
 
     def forward(self, x, t):
-        # assert dtype is float64 in production setting
-        if "mps" not in str(x.device): assert x.dtype == torch.float64
-
         # reshape sigmas for color images
         if len(x.shape) == 4:
             sigmas = self.schedule(t)[:, None, None, None]

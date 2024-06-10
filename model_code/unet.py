@@ -584,7 +584,7 @@ class UNetModel(nn.Module):
                 ich = input_block_chans.pop()
                 layers = [
                     ResBlock(
-                        ch + ich,
+                        ch + ich + 1,  # +1 for z latent channel ('noise/'information' channel)
                         time_embed_dim,
                         dropout,
                         out_channels=int(model_channels * mult),
@@ -635,7 +635,7 @@ class UNetModel(nn.Module):
                         padding=1, padding_mode=self.padding_mode)),
         )
 
-    def forward(self, x, scales, z=None):
+    def forward(self, x, scales, zs:list=None):
         """
         Apply the model to an input batch.
 
@@ -648,16 +648,19 @@ class UNetModel(nn.Module):
         emb = self.time_embed(timestep_encoding(
             scales, self.model_channels))
 
-        if z is not None:
-            emb = emb + self.z_emb(z)
+        if zs is not None:
+            emb = emb + self.z_emb(zs.pop())
 
         h = x.type(self.dtype)
         for module in self.input_blocks:
             h = module(h, emb)
             hs.append(h)
         h = self.middle_block(h, emb)
+        z = zs.pop().unsqueeze(1)
         for module in self.output_blocks:
-            h = th.cat([h, hs.pop()], dim=1)
+            if h.shape[-1] != z.shape[-1]:
+                z = zs.pop().unsqueeze(1)
+            h = th.cat([h, hs.pop(), z], dim=1)
             h = module(h, emb)
         h = h.type(x.dtype)
         return self.out(h)

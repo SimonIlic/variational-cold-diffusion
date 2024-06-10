@@ -121,17 +121,26 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
 
                 blurred_batch = heat_forward_module(batch, input_t).float()
                 target_batch = heat_forward_module(batch, target_t).float()
-                reconstructed, z, mu , log_var = model_fn(target_batch, blurred_batch, input_t - target_t)
+                reconstructed, z, latent_params = model_fn(target_batch, blurred_batch, input_t - target_t)
 
                 # l1 norm of the difference between the reconstructed and the original image
                 reconstruction_loss = torch.abs(reconstructed - target_batch)
                 reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
 
-                kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+                kl_divs = []
+                for params in latent_params:
+                    mu, log_var = params[:, 0, ...], params[:, 1, ...]
+                    mu = mu.flatten(start_dim=1)
+                    log_var = log_var.flatten(start_dim=1)
 
-                loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
+                    kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+                    kl_divs.append(kl_div)
 
-                return loss, (reconstruction_loss, kl_div), input_t
+                kl_divs = torch.cat(kl_divs)
+
+                loss = torch.mean(reconstruction_loss) + torch.mean(kl_divs)
+
+                return loss, (reconstruction_loss, kl_divs), input_t
 
 
     elif config.model.loss_type == 'risannen':

@@ -23,6 +23,10 @@ class SiLU(nn.Module):
 class GroupNorm32(nn.GroupNorm):
     def forward(self, x):
         return super().forward(x.float()).type(x.dtype)
+    
+class InstanceNorm(nn.InstanceNorm2d):
+    def forward(self, x):
+        return super().forward(x.float()).type(x.dtype)
 
 
 def conv_nd(dims, *args, **kwargs):
@@ -104,7 +108,7 @@ def normalization(channels):
     :param channels: number of input channels.
     :return: an nn.Module for normalization.
     """
-    return GroupNorm32(32, channels)
+    return InstanceNorm(channels)
 
 
 def timestep_encoding(sigmas, dim, max_period=10000):
