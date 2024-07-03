@@ -1,3 +1,7 @@
+This is a fork.
+
+
+Original Readme
 # Generative Modelling With Inverse Heat Dissipation
  
 This repository is the official implementation of the methods in the publication:
