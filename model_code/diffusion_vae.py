@@ -3,7 +3,7 @@ import torch as th
 import torch.nn as nn
 
 from .unet import UNetModel
-from .encoder import Encoder
+from .unet import VAEncoder as Encoder
 
 class DiffusionVAE(nn.Module):
     def __init__(self, config):
@@ -13,13 +13,13 @@ class DiffusionVAE(nn.Module):
         self.encoder = Encoder(config)
         self.decoder = UNetModel(config)
 
-    def forward(self, x_t, x_tp1, scales):
+    def forward(self, xt, x0, t):
         # sample z from q(z|x_t, x_tp1, t)
-        z, latent_params = self.encoder(x_t, x_tp1, scales)
+        z, latent_params = self.encoder(xt, x0, t)
         # decode x_t from xtp1, z and t
-        return self.decoder(x_tp1, scales, z), z, latent_params
+        return self.decoder(xt, t, z), z, latent_params
     
-    def sample(self, x, t, z=None):
+    def sample(self, xt, x0, t, z=None):
         if z is None:
-            z, _ = self.encoder.sample(x.shape[0])
-        return self.decoder(x, t, z)
+            z, (mu, log_var) = self.encoder(xt, x0, t)
+        return self.decoder(xt, t, z)

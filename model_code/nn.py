@@ -108,10 +108,10 @@ def normalization(channels):
     :param channels: number of input channels.
     :return: an nn.Module for normalization.
     """
-    return InstanceNorm(channels)
+    return GroupNorm32(32, channels)
 
 
-def timestep_encoding(sigmas, dim, max_period=10000):
+def timestep_encoding(t, dim, max_period=10000):
     """
     Create sinusoidal timestep embeddings.
 
@@ -121,12 +121,11 @@ def timestep_encoding(sigmas, dim, max_period=10000):
     :param max_period: controls the minimum frequency of the embeddings.
     :return: an [N x dim] Tensor of positional embeddings.
     """
-    t = sigmas ** 2 / 2
     half = dim // 2
     freqs = th.exp(
         -math.log(max_period) * th.arange(start=0,
                                           end=half, dtype=th.float32) / half
-    ).to(device=sigmas.device)
+    ).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = th.cat([th.cos(args), th.sin(args)], dim=-1)
     if dim % 2:

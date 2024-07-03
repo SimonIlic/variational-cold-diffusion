@@ -457,7 +457,7 @@ class UNetModel(nn.Module):
         self.num_res_blocks = num_res_blocks = config.model.num_res_blocks
         self.attention_levels = attention_levels = config.model.attention_levels
         self.dropout = dropout = config.model.dropout
-        self.channel_mult = channel_mult = config.model.channel_mult
+        self.channel_mult = channel_mult = config.model.channel_mult[:-1] if config.data.dataset == 'MNIST' else config.model.channel_mult
         self.conv_resample = conv_resample = config.model.conv_resample
         self.num_classes = num_classes = None
         self.latent_dim = latent_dim = config.model.encoder.latent_dim
@@ -584,7 +584,7 @@ class UNetModel(nn.Module):
                 ich = input_block_chans.pop()
                 layers = [
                     ResBlock(
-                        ch + ich + 1,  # +1 for z latent channel ('noise/'information' channel)
+                        ch + ich,
                         time_embed_dim,
                         dropout,
                         out_channels=int(model_channels * mult),
@@ -635,7 +635,7 @@ class UNetModel(nn.Module):
                         padding=1, padding_mode=self.padding_mode)),
         )
 
-    def forward(self, x, scales, zs:list=None):
+    def forward(self, x, t, z=None):
         """
         Apply the model to an input batch.
 
@@ -646,21 +646,222 @@ class UNetModel(nn.Module):
         """
         hs = []
         emb = self.time_embed(timestep_encoding(
-            scales, self.model_channels))
+            t, self.model_channels))
 
-        if zs is not None:
-            emb = emb + self.z_emb(zs.pop())
+        if z is not None:
+            emb = emb + self.z_emb(z)
 
         h = x.type(self.dtype)
         for module in self.input_blocks:
             h = module(h, emb)
             hs.append(h)
         h = self.middle_block(h, emb)
-        z = zs.pop().unsqueeze(1)
         for module in self.output_blocks:
-            if h.shape[-1] != z.shape[-1]:
-                z = zs.pop().unsqueeze(1)
-            h = th.cat([h, hs.pop(), z], dim=1)
+            h = th.cat([h, hs.pop()], dim=1)
             h = module(h, emb)
         h = h.type(x.dtype)
         return self.out(h)
+
+class VAEncoder(nn.Module):
+    """
+    The full UNet model with attention and timestep embedding.
+
+    :param in_channels: channels in the input Tensor.
+    :param model_channels: base channel count for the model.
+    :param out_channels: channels in the output Tensor.
+    :param num_res_blocks: number of residual blocks per downsample.
+    :param attention_resolutions: a collection of downsample rates at which
+        attention will take place. May be a set, list, or tuple.
+        For example, if this contains 4, then at 4x downsampling, attention
+        will be used.
+    :param dropout: the dropout probability.
+    :param channel_mult: channel multiplier for each level of the UNet.
+    :param conv_resample: if True, use learned convolutions for upsampling and
+        downsampling.
+    :param dims: determines if the signal is 1D, 2D, or 3D.
+    :param num_classes: if specified (as an int), then this model will be
+        class-conditional with `num_classes` classes.
+    :param use_checkpoint: use gradient checkpointing to reduce memory usage.
+    :param num_heads: the number of attention heads in each attention layer.
+    :param num_heads_channels: if specified, ignore num_heads and instead use
+                               a fixed channel width per attention head.
+    :param num_heads_upsample: works with num_heads to set a different number
+                               of heads for upsampling. Deprecated.
+    :param use_scale_shift_norm: use a FiLM-like conditioning mechanism.
+    :param resblock_updown: use residual blocks for up/downsampling.
+    :param use_new_attention_order: use a different attention pattern for potentially
+                                    increased efficiency.
+    """
+
+    def __init__(
+        self,
+        config,
+        use_checkpoint=False
+    ):
+        super().__init__()
+
+        if config.model.num_heads_upsample == -1:
+            num_heads_upsample = config.model.num_heads
+
+        self.device = config.device
+        self.image_size = image_size = config.data.image_size
+        self.in_channels = in_channels = config.data.num_channels * 2
+        self.model_channels = model_channels = config.model.model_channels
+        self.out_channels = out_channels = config.data.num_channels
+        self.num_res_blocks = num_res_blocks = config.model.num_res_blocks
+        self.attention_levels = attention_levels = config.model.attention_levels
+        self.dropout = dropout = config.model.dropout
+        self.channel_mult = channel_mult = config.model.channel_mult
+        self.conv_resample = conv_resample = config.model.conv_resample
+        self.num_classes = num_classes = None
+        self.latent_dim = latent_dim = config.model.encoder.latent_dim
+        self.use_checkpoint = use_checkpoint = use_checkpoint
+        self.dtype = dtype = th.float16 if config.model.use_fp16 else th.float32
+        self.num_heads = num_heads = config.model.num_heads
+        self.num_head_channels = num_head_channels = config.model.num_head_channels
+        self.num_heads_upsample = num_heads_upsample
+        self.use_new_attention_order = use_new_attention_order = config.model.use_new_attention_order
+        dims = 2  # Constant for our purposes
+        self.use_scale_shift_norm = use_scale_shift_norm = config.model.use_scale_shift_norm
+        self.resblock_updown = resblock_updown = config.model.resblock_updown
+        self.padding_mode = 'zeros'
+        time_embed_dim = model_channels * 4
+        self.time_embed = nn.Sequential(
+            linear(self.model_channels, time_embed_dim),
+            nn.SiLU(),
+            linear(time_embed_dim, time_embed_dim),
+        )
+
+        ch = input_ch = int(channel_mult[0] * model_channels)
+        self.input_blocks = nn.ModuleList(
+            [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1,
+                                             padding_mode=self.padding_mode))]
+        )
+        self._feature_size = ch
+        input_block_chans = [ch]
+        ds = 0  # Counter for selecting the levels where attention is applied
+        for level, mult in enumerate(channel_mult):
+            for _ in range(num_res_blocks):
+                layers = [
+                    ResBlock(
+                        ch,
+                        time_embed_dim,
+                        self.dropout,
+                        out_channels=int(mult * model_channels),
+                        dims=dims,
+                        use_checkpoint=use_checkpoint,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                        padding_mode=self.padding_mode
+                    )
+                ]
+                ch = int(mult * model_channels)
+                if ds in attention_levels:
+                    layers.append(
+                        AttentionBlock(
+                            ch,
+                            use_checkpoint=use_checkpoint,
+                            num_heads=num_heads,
+                            num_head_channels=num_head_channels,
+                            use_new_attention_order=use_new_attention_order,
+                            padding_mode=self.padding_mode
+                        )
+                    )
+                self.input_blocks.append(TimestepEmbedSequential(*layers))
+                self._feature_size += ch
+                input_block_chans.append(ch)
+            if level != len(channel_mult) - 1:
+                out_ch = ch
+                self.input_blocks.append(
+                    TimestepEmbedSequential(
+                        ResBlock(
+                            ch,
+                            time_embed_dim,
+                            dropout,
+                            out_channels=out_ch,
+                            dims=dims,
+                            use_checkpoint=use_checkpoint,
+                            use_scale_shift_norm=use_scale_shift_norm,
+                            down=True,
+                            padding_mode=self.padding_mode
+                        )
+                        if resblock_updown
+                        else Downsample(
+                            ch, conv_resample, dims=dims, out_channels=out_ch,
+                            padding_mode=self.padding_mode
+                        )
+                    )
+                )
+                ch = out_ch
+                input_block_chans.append(ch)
+                ds += 1
+                self._feature_size += ch
+
+        self.middle_block = TimestepEmbedSequential(
+            ResBlock(
+                ch,
+                time_embed_dim,
+                dropout,
+                dims=dims,
+                use_checkpoint=use_checkpoint,
+                use_scale_shift_norm=use_scale_shift_norm,
+                padding_mode=self.padding_mode
+            ),
+            AttentionBlock(
+                ch,
+                use_checkpoint=use_checkpoint,
+                num_heads=num_heads,
+                num_head_channels=num_head_channels,
+                use_new_attention_order=use_new_attention_order,
+                padding_mode=self.padding_mode
+            ),
+            ResBlock(
+                ch,
+                time_embed_dim,
+                dropout,
+                dims=dims,
+                use_checkpoint=use_checkpoint,
+                use_scale_shift_norm=use_scale_shift_norm,
+                padding_mode=self.padding_mode
+            ),
+        )
+        self._feature_size += ch
+
+        # final image is 4x4
+        self.fc_mu = linear(ch * 4 * 4, latent_dim)
+        self.fc_var = linear(ch * 4 * 4, latent_dim)
+
+    def reparameterize(self, mu, logvar):
+        std = th.exp(0.5 * logvar)
+        eps = th.randn_like(std)
+        return mu + eps * std
+    
+    def sample(self, batch_size):
+        """ Sample z from std normal prior"""
+        z = th.randn(batch_size, self.latent_dim, device=self.device)
+        return z, (0, 1)
+
+    def forward(self, xt, x0, t):
+        """
+        Apply the model to an input batch.
+
+        :param x: an [N x C x ...] Tensor of inputs.
+        :param timesteps: a 1-D batch of timesteps.
+        :param y: an [N] Tensor of labels, if class-conditional.
+        :return: an [N x C x ...] Tensor of outputs.
+        """
+        emb = self.time_embed(timestep_encoding(
+            t, self.model_channels))
+        
+        x = th.cat([xt, x0], dim=1)
+
+        h = x.type(self.dtype)
+        for module in self.input_blocks:
+            h = module(h, emb)
+        h = self.middle_block(h, emb)
+
+        h = th.flatten(h, start_dim=1)
+        mu = self.fc_mu(h)
+        log_var = self.fc_var(h)
+        z = self.reparameterize(mu, log_var)
+        
+        return z, (mu, log_var)

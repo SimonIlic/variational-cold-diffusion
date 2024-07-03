@@ -6,11 +6,68 @@ import numpy as np
 from model_code.unet import UNetModel
 from model_code.diffusion_vae import DiffusionVAE
 import torch_dct
+import torchgeometry as tgm
+
+
+def cosine_schedule(t, s=0.0):
+    return torch.cos((t + s) / (1 + s) * torch.pi * 0.5) ** 2
+
+class HardVignette(nn.Module):
+    def __init__(self, config):
+        super(HardVignette, self).__init__()
+        self.config = config
+        self.image_size = config.data.image_size
+        self.max_radius = np.sqrt(self.image_size**2 / 2)
+        self.device = config.device
+
+    def create_circle_images(self, image_size, radii):
+        # Create a meshgrid of coordinates
+        y, x = torch.meshgrid(torch.arange(image_size, device=self.device), torch.arange(image_size, device=self.device))
+        y, x = y.float(), x.float()
+        
+        # Calculate the center coordinates of the circle
+        center = image_size // 2
+
+        # Calculate distance from the center for each coordinate
+        dist_from_center = torch.sqrt((x - center) ** 2 + (y - center) ** 2)
+
+        # Initialize a tensor to hold all the circle images
+        num_radii = len(radii)
+        images = torch.ones((num_radii, image_size, image_size), device=self.device)
+
+        # Create circle images for each radius
+        for idx, radius in enumerate(radii):
+            images[idx] = (dist_from_center > radius).float()
+
+        return images
+    
+    def schedule(self, t):
+        return self.max_radius * (1 - cosine_schedule(t).sqrt())
+    
+    def forward(self, x, t):
+        radii = self.schedule(t)
+        circle_images = self.create_circle_images(self.image_size, radii).to(x.device)
+        return x * circle_images[:, None, :, :]
+        
+
+
+class Fade(nn.Module):
+    def __init__(self):
+        super(Fade, self).__init__()
+
+    def forward(self, x, t):
+        fade = cosine_schedule(t).sqrt().to(x.device)
+        # reshape sigmas for color images
+        if len(x.shape) == 4:
+            fade = fade[:, None, None, None]
+        elif len(x.shape) == 3:
+            fade = fade[:, None, None]
+        return x * fade
 
 
 class DCTBlur(nn.Module):
 
-    def __init__(self, max_blur, image_size, device, min_scale=0.001) :
+    def __init__(self, max_blur, image_size, device, min_scale=0.0) :
         super(DCTBlur, self).__init__()
         freqs = np.pi*torch.linspace(0, image_size-1,
                                      image_size).to(device)/image_size
@@ -20,8 +77,12 @@ class DCTBlur(nn.Module):
 
     def schedule(self, t):
         return self.max_blur * torch.sin(t * torch.pi / 2)**2
+        #return self.max_blur * torch.sin(t * torch.pi / 2)**2
 
     def forward(self, x, t):
+        # ensure float64 for idct precision
+        dtype = x.dtype
+        if "mps" not in str(x.device): x = x.to(torch.float64)
         # reshape sigmas for color images
         if len(x.shape) == 4:
             sigmas = self.schedule(t)[:, None, None, None]
@@ -31,21 +92,102 @@ class DCTBlur(nn.Module):
             t = t[:, None, None]
         
         # convert sigma to tau
-        tau = sigmas**2/2
+        tau = sigmas ** 2 / 2
     
         dct_x = torch_dct.dct_2d(x, norm='ortho')
         blurred_dct_x = dct_x * (torch.exp(- self.frequencies_squared * tau) * (1 - self.min_scale) + self.min_scale)
         blurred_x =  torch_dct.idct_2d(blurred_dct_x, norm='ortho')
 
-        # fade to black
-        faded_blurred_x = blurred_x * (1 - t)**0.5
+        return blurred_x.to(dtype)
+    
+class Vignette(nn.Module):
+    def __init__(self, config, max_sigma, image_size, device):
+        super(Vignette, self).__init__()
+        self.image_size = image_size
+        self.device = device
+        self.max_sigma = max_sigma
 
-        return faded_blurred_x
+        self.channels = config.data.num_channels
 
+        if image_size % 2 == 0:
+            self.kernel_size = image_size + 1
+        else:
+            self.kernel_size = image_size
 
-def create_forward_process_from_sigmas(config, sigmas, device):
+    def gaussian_kernel(self, batch_size: int, channels: int, kernel_size: int, sigmas: torch.Tensor):
+        """ Returns 2D gaussian kernel of batch size with size x size dimensions and standard deviation sigma. Sigmas is a vector with a different sigma for every element in the batch. Final tensor shape is [B, C, size, size]"""
+        kernels = []
+        for sigma in sigmas:
+            kernel = tgm.image.get_gaussian_kernel2d((kernel_size, kernel_size), (sigma, sigma))
+            # normalise the kernel
+            kernel = kernel / kernel.max()
+            kernel = 1 - kernel
+
+            kernels.append(kernel)
+        kernels = torch.stack(kernels)
+
+        if self.image_size % 2 == 0:
+            kernels = kernels[:, 1:, 1:]
+
+        kernels = kernels.unsqueeze(1).repeat(1, channels, 1, 1)
+
+        return kernels
+        
+    def schedule(self, t):
+        return  self.max_sigma * t    
+      
+    def forward(self, x, t):
+        sigmas = self.schedule(t)
+
+        vignette = self.gaussian_kernel(x.shape[0], self.channels, self.kernel_size, sigmas)
+
+        return x * vignette.to(x.device)
+    
+class Noise(nn.Module):
+    def __init__(self, config):
+        super(Noise, self).__init__()
+
+    def forward(self, x, t, noise=None):
+        if noise is None:
+            noise = torch.randn_like(x)
+
+        a = cosine_schedule(t)
+
+        if len(x.shape) == 4:
+            a = a[:, None, None, None]
+        elif len(x.shape) == 3:
+            a = a[:, None, None]
+
+        return a.sqrt() * x + (1-a).sqrt() * noise
+    
+class ComboDegrader(nn.Module):
+    def __init__(self, degredation_list):
+        super(ComboDegrader, self).__init__()
+        self.degradation_list = degredation_list
+
+    def forward(self, x, t):
+        for degradation in self.degradation_list:
+            x = degradation(x, t)
+        return x
+
+def create_forward_process_from_sigmas(config, device):
     forward_process_module = DCTBlur(config.model.blur_sigma_max , config.data.image_size, device)
     return forward_process_module
+
+def fade_forward_process(config):
+    return Fade()
+
+def vignette_forward_process(config):
+    return Vignette(config, config.model.blur_sigma_max, config.data.image_size, config.device)
+
+def hard_vignette_forward_process(config):
+    return HardVignette(config)
+
+def noise_forward_process(config):
+    return Noise(config)
+
+def combo_forward_process(config, process_list):
+    return ComboDegrader(process_list)
 
 
 """Utilities related to log-likelihood evaluation"""

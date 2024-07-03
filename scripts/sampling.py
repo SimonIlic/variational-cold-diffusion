@@ -2,7 +2,56 @@ import torch
 import numpy as np
 import logging
 from scripts import datasets
+from model_code.utils import cosine_schedule
 
+def get_sampling_fn_noise_forward(config, initial_sample, intermediate_sample_indices, delta, device, share_noise=False, degradation_operator=None):
+    # sampler as described in Bansal et al. 2023 (TaCoS)
+    K = config.model.K
+
+    def sampler(model):
+        intermediate_samples_out = []
+        with torch.no_grad():
+            u = initial_sample.to(config.device).float()
+            if intermediate_sample_indices != None and K in intermediate_sample_indices:
+                intermediate_samples_out.append((u, u))
+            steps = np.linspace(1, 0, K)
+            for i, t in enumerate(steps[:-1]):
+                vec_t = torch.ones(
+                    initial_sample.shape[0], device=device, dtype=torch.long) * t
+                vec_tm1 = torch.ones(
+                    initial_sample.shape[0], device=device, dtype=torch.long) * steps[i+1]
+                
+                # predict reconstruction
+                if i == 0:
+                    z = torch.randn(config.model.encoder.latent_dim, device=config.device)
+                    # expand z to batch size
+                    z = z.expand(u.shape[0], -1)
+                    reconstructed = model(u, None, vec_t, z)
+                else:
+                    reconstructed = model(u, reconstructed, vec_t, None)
+
+                a = cosine_schedule(vec_t)
+                # reshape to fit channel dimension
+                if len(u.shape) == 4:
+                    a = a[:, None, None, None]
+                else:
+                    a = a[:, None, None]
+                noise_estimate = (u - a.sqrt() * reconstructed) / (1 - a).sqrt()
+                # update step-by-step reconstruction
+                u = u - degradation_operator(reconstructed, vec_t, noise_estimate) + degradation_operator(reconstructed, vec_tm1, noise_estimate)
+                u = u.float()  # make sure u is in floats
+
+                # noise the reconstruction a bit for sampling variation
+                noise = torch.randn_like(u) * delta
+                u = u + noise
+
+                # Save trajectory
+                if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
+                    intermediate_samples_out.append((u, reconstructed))
+            
+            return u, config.model.K, [u for (u, reconstructed) in intermediate_samples_out], [reconstructed for (u, reconstructed) in intermediate_samples_out]
+
+    return sampler
 
 def get_sampling_fn_inverse_heat(config, initial_sample,
                                  intermediate_sample_indices, delta, device,
@@ -48,21 +97,30 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                 return u_mean, config.model.K, [u for (u, diff) in intermediate_samples_out], [diff for (u, diff) in intermediate_samples_out]
     
     elif config.model.loss_type == "bansal" or config.model.loss_type == "variable_t":
-        # sampler as described in Bansal et al. 2022 (Algorithm 2)
+        # sampler as described in Bansal et al. 2023 (TaCoS)
         def sampler(model):
             intermediate_samples_out = []
             with torch.no_grad():
                 u = initial_sample.to(config.device).float()
                 if intermediate_sample_indices != None and K in intermediate_sample_indices:
                     intermediate_samples_out.append((u, u))
-                for i in range(K, 0, -1):
-                    vec_fwd_steps = torch.ones(
-                        initial_sample.shape[0], device=device, dtype=torch.long) * i
-                    scales = blur_schedule[vec_fwd_steps]
+                steps = np.linspace(1, 0, K)
+                for i, t in enumerate(steps[:-1]):
+                    vec_t = torch.ones(
+                        initial_sample.shape[0], device=device, dtype=torch.long) * t
+
                     # predict reconstruction
-                    reconstructed = model(u, scales)
+                    if i == 0:
+                        z = torch.randn(config.model.encoder.latent_dim, device=config.device)
+                        # expand z to batch size
+                        z = z.expand(u.shape[0], -1)
+                        reconstructed = model(u, None, vec_t, z)
+                    else:
+                        reconstructed = model(u, reconstructed, vec_t, None)
+                    
                     # update step-by-step reconstruction
-                    u = u - degradation_operator(reconstructed, vec_fwd_steps) + degradation_operator(reconstructed, vec_fwd_steps - 1)
+                    u = u - degradation_operator(reconstructed, vec_t) + degradation_operator(reconstructed, torch.ones(
+                        initial_sample.shape[0], device=device, dtype=torch.long) * steps[i+1])
                     u = u.float()  # make sure u is in floats
 
                     # noise the reconstruction a bit for sampling variation
@@ -145,4 +203,8 @@ def get_initial_sample(config, forward_heat_module, delta, batch_size=None):
 def get_zero_initial_sample(config):
     """Take a draw from the prior p(u_K), i.e. zero vectors"""
     initial_sample = torch.zeros(config.eval.batch_size, config.data.num_channels, config.data.image_size, config.data.image_size).to(config.device)
+    return initial_sample
+
+def get_noise_initial_sample(config):
+    initial_sample = torch.randn(config.eval.batch_size, config.data.num_channels, config.data.image_size, config.data.image_size).to(config.device)
     return initial_sample

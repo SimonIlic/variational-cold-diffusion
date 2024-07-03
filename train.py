@@ -90,14 +90,13 @@ def train(config, workdir):
 
     # Get the forward process definition
     scales = config.model.blur_schedule
-    heat_forward_module = mutils.create_forward_process_from_sigmas(
-        config, scales, config.device)
+    degrader = create_degrader(config)
 
     # Get the loss function
     train_step_fn = losses.get_step_fn(train=True, scales=scales, config=config, optimize_fn=optimize_fn,
-                                       heat_forward_module=heat_forward_module)
+                                       heat_forward_module=degrader)
     eval_step_fn = losses.get_step_fn(train=False, scales=scales, config=config, optimize_fn=optimize_fn,
-                                      heat_forward_module=heat_forward_module)
+                                      heat_forward_module=degrader)
 
     # Building sampling functions
     delta = config.model.delta
@@ -106,7 +105,11 @@ def train(config, workdir):
                                                         initial_sample, intermediate_sample_indices=list(
                                                             range(config.model.K+1)),
                                                         delta=config.model.delta, device=config.device,
-                                                        degradation_operator=heat_forward_module)
+                                                        degradation_operator=degrader)
+    
+    # override sampling function
+    initial_sample = sampling.get_zero_initial_sample(config)
+    sampling_fn = sampling.get_sampling_fn_inverse_heat(config, initial_sample, intermediate_sample_indices=list(range(config.model.K+1)), delta=delta, device=config.device, degradation_operator=degrader)
 
     num_train_steps = config.training.n_iters
     logging.info("Starting training loop at step %d." % (initial_step,))
@@ -186,6 +189,22 @@ def train(config, workdir):
             # save model prediction trajectory
             utils.save_gif(this_sample_dir, model_predictions, "model_predictions.gif")
             utils.save_video(this_sample_dir, model_predictions, "model_predictions.mp4")
+
+def create_degrader(config):
+    if config.degrader == 'hard_vignette':
+        return mutils.hard_vignette_forward_process(config)
+    elif config.degrader == 'vignette':
+        return mutils.vignette_forward_process(config)
+    elif config.degrader == 'blur':
+        return mutils.create_forward_process_from_sigmas(config, config.device)
+    elif config.degrader == 'fade':
+        return mutils.fade_forward_process(config)
+    elif config.degrader == 'blur_fade':
+        blur = mutils.create_forward_process_from_sigmas(config, config.device)
+        fade = mutils.fade_forward_process(config)
+        return mutils.combo_forward_process(config, [blur, fade])
+    elif config.degrader == 'noise':
+        return mutils.noise_forward_process(config)
 
 def track_experiment(config):
     wandb.init(

@@ -92,10 +92,11 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
             def loss_fn(model, batch):
                 model_fn = mutils.get_model_fn(
                     model, train=train)
-                fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
-                scales = blur_schedule[fwd_steps]
-                blurred_batch = heat_forward_module(batch, fwd_steps).float()
-                reconstructed, z, mu , log_var = model_fn(batch, blurred_batch, scales)
+                
+                t = torch.tensor(np.float32(np.random.uniform(0, 1, batch.shape[0])), device=device)
+
+                blurred_batch = heat_forward_module(batch, t).float()
+                reconstructed, z, (mu, log_var) = model_fn(blurred_batch, batch, t)
 
                 # l1 norm of the difference between the reconstructed and the original image
                 reconstruction_loss = torch.abs(reconstructed - batch)
@@ -105,7 +106,7 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
 
                 loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
 
-                return loss, (reconstruction_loss, kl_div), fwd_steps
+                return loss, (reconstruction_loss, kl_div), t
 
         elif config.model.loss_type == 'variable_t':
             def loss_fn(model, batch):
@@ -113,6 +114,7 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                     model, train=train)
                 # get time for input and target
                 input_t = np.float32(np.random.uniform(0, 1, batch.shape[0]))
+                input_t[input_t.argmax()] = 1.0  # clip max to 1 to expose model to completely dark image in training
                 target_t = np.float32(np.random.uniform(0, input_t))
 
                 # move times to device
