@@ -100,17 +100,18 @@ def train(config, workdir):
 
     # Building sampling functions
     delta = config.model.delta
-    initial_sample = sampling.get_zero_initial_sample(config)
-    sampling_fn = sampling.get_sampling_fn_inverse_heat(config,
+    initial_sample = sampling.get_initial_sample(config, degrader, delta, config.eval.batch_size)
+
+    if config.degrader == 'noise':
+        sampling_fn = sampling.get_sampling_fn_noise_forward(config,
                                                         initial_sample, intermediate_sample_indices=list(
                                                             range(config.model.K+1)),
                                                         delta=config.model.delta, device=config.device,
                                                         degradation_operator=degrader)
+    else:
+        sampling_fn = sampling.get_sampling_fn_inverse_heat(config, initial_sample, intermediate_sample_indices=list(
+            range(config.model.K+1)), delta=config.model.delta, device=config.device, degradation_operator=degrader)
     
-    # override sampling function
-    initial_sample = sampling.get_zero_initial_sample(config)
-    sampling_fn = sampling.get_sampling_fn_inverse_heat(config, initial_sample, intermediate_sample_indices=list(range(config.model.K+1)), delta=delta, device=config.device, degradation_operator=degrader)
-
     num_train_steps = config.training.n_iters
     logging.info("Starting training loop at step %d." % (initial_step,))
     logging.info("Running on {}".format(config.device))
@@ -205,6 +206,8 @@ def create_degrader(config):
         return mutils.combo_forward_process(config, [blur, fade])
     elif config.degrader == 'noise':
         return mutils.noise_forward_process(config)
+
+    
 
 def track_experiment(config):
     wandb.init(
