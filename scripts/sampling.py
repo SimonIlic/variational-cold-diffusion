@@ -190,14 +190,14 @@ def get_sampling_fn_inverse_heat_interpolate(config, initial_sample,
 
 def get_initial_sample(config, forward_heat_module, delta, batch_size=None):
     """Take a draw from the prior p(u_K)"""
-    trainloader, _ = datasets.get_dataset(config,
+    trainloader, testloader = datasets.get_dataset(config,
                                           uniform_dequantization=config.data.uniform_dequantization,
                                           train_batch_size=batch_size)
 
-    initial_sample = next(iter(trainloader))[0].to(config.device)
+    initial_sample = next(iter(testloader))[0].to(config.device)
     original_images = initial_sample.clone()
     initial_sample = forward_heat_module(initial_sample,
-                                         config.model.K * torch.ones(initial_sample.shape[0], dtype=torch.long).to(config.device))
+                                         torch.ones(initial_sample.shape[0], dtype=torch.long).to(config.device))
     return initial_sample, original_images
 
 def get_zero_initial_sample(config):
@@ -208,3 +208,4 @@ def get_zero_initial_sample(config):
 def get_noise_initial_sample(config):
     initial_sample = torch.randn(config.eval.batch_size, config.data.num_channels, config.data.image_size, config.data.image_size).to(config.device)
     return initial_sample
+
