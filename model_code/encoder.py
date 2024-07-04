@@ -90,9 +90,9 @@ class ZsEncoder(nn.Module):
         self.hidden_dims = hidden_dims = config.model.encoder.hidden_dims
         self.base_dim = base_dim = hidden_dims[0]
 
-        self.z_shapes = [()]
-
         self.img_size = img_size = config.data.image_size
+
+        self.z_shapes = [(int(img_size / 2**i), int(img_size / 2**i)) for i in range(len(hidden_dims))] + [(latent_dim, )]
 
         in_channels = original_in_channels = config.data.num_channels * 2 + 1  # x_t, x_{t+1}, t
 
@@ -107,7 +107,7 @@ class ZsEncoder(nn.Module):
         for h_dim in hidden_dims:
             modules.append(
                 nn.Sequential(
-                    conv_nd(2, in_channels, h_dim + 2, kernel_size=3, stride=2, padding=1, device=config.device),
+                    conv_nd(2, in_channels, h_dim + 2, kernel_size=3, stride=2, padding=1),
                     normalization(h_dim + 2),
                     nn.SiLU(),
                     nn.Dropout(config.model.dropout)
@@ -175,7 +175,8 @@ class ZsEncoder(nn.Module):
             std = torch.exp(0.5 * log_var)
             eps = torch.randn_like(std)
             z = eps * std + mu
-            
+            if len(z.shape) > 2:
+                z = torch.zeros_like(z)
             zs.append(z)
         return zs
     
@@ -186,14 +187,14 @@ class ZsEncoder(nn.Module):
         latent_params = self.encode(x)
         zs = self.reparameterize(latent_params)
 
-        if self.z_shapes is None:
-            self.z_shapes = [z.shape[1:] for z in zs]
         return zs, latent_params
     
     def sample(self, batch_size):
         """Sample z from prior."""
         zs = []
         for shape in self.z_shapes:
-            z = torch.randn(batch_size, *shape)
+            z = torch.randn(batch_size, *shape, device=self.config.device)
+            if len(z.shape) > 2:
+                z = torch.zeros_like(z)
             zs.append(z)
-        return zs
+        return zs, (0, 1)
