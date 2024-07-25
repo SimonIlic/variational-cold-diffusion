@@ -100,7 +100,7 @@ def train(config, workdir):
 
     # Building sampling functions
     delta = config.model.delta
-    initial_sample = sampling.get_initial_sample(config, degrader, delta, config.eval.batch_size)
+    initial_sample, _ = sampling.get_initial_sample(config, degrader, delta, config.eval.batch_size)
 
     if config.degrader == 'noise':
         sampling_fn = sampling.get_sampling_fn_noise_forward(config,

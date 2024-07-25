@@ -19,7 +19,7 @@ def create_circle_image(image_size, circle_radius):
 import matplotlib.pyplot as plt
 
 # Create the circle image
-circle_image = create_circle_image(64, 0)
+circle_image = create_circle_image(64, 10)
 
 # Plot the image
 plt.imshow(circle_image, cmap='gray')
