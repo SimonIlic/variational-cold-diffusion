@@ -826,9 +826,17 @@ class VAEncoder(nn.Module):
         )
         self._feature_size += ch
 
+        # create fc mu, var layers
         # final image is 4x4
-        self.fc_mu = linear(ch * 4 * 4, latent_dim)
-        self.fc_var = linear(ch * 4 * 4, latent_dim)
+        fc_mu = [linear(ch * 4 * 4, latent_dim)]
+        for _ in range(config.model.encoder.fc_layers - 1):
+            fc_mu += [nn.SiLU(), linear(latent_dim, latent_dim)]
+        self.fc_mu = nn.Sequential(*fc_mu)
+
+        fc_var = [linear(ch * 4 * 4, latent_dim)]
+        for _ in range(config.model.encoder.fc_layers - 1):
+            fc_var += [nn.SiLU(), linear(latent_dim, latent_dim)]
+        self.fc_var = nn.Sequential(*fc_var)
 
     def reparameterize(self, mu, logvar):
         std = th.exp(0.5 * logvar)
