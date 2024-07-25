@@ -55,7 +55,7 @@ def optimization_manager(config):
 
 
 def get_label_sampling_function(K):
-    return lambda batch_size, device: torch.randint(1, K+1, (batch_size,), device=device)
+    return lambda batch_size, device: torch.randint(1, K, (batch_size,), device=device)
 
 
 def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module):
@@ -88,6 +88,35 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                 loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
 
                 return loss, (reconstruction_loss, kl_div), fwd_steps
+            
+        elif config.model.loss_type == 'trajectory_matching':
+            def loss_fn(model, batch):
+                model_fn = mutils.get_model_fn(
+                    model, train=train)
+                fwd_steps = label_sampling_fn(batch.shape[0], batch.device)
+                scales = blur_schedule[fwd_steps]
+
+                input = heat_forward_module(batch, blur_schedule[fwd_steps+1]).float()
+                intermediate = heat_forward_module(batch, blur_schedule[fwd_steps]).float()
+
+                # get preturbed input
+                with torch.no_grad():
+                    input, z, latent_params = model_fn(input, intermediate, blur_schedule[fwd_steps+1])
+                
+                target = heat_forward_module(batch, blur_schedule[fwd_steps-1]).float()
+                prediction, z, (mu, log_var) =model_fn(input, target, scales)
+
+                # l2 norm of the difference between the reconstructed and the original image
+                reconstruction_loss = (prediction - target)**2
+                reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
+
+                kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+
+                loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
+
+                return loss, (reconstruction_loss, kl_div), fwd_steps
+
+
         elif config.model.loss_type == 'bansal':
             def loss_fn(model, batch):
                 model_fn = mutils.get_model_fn(
