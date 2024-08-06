@@ -3,6 +3,7 @@ import numpy as np
 import logging
 from scripts import datasets
 from model_code.utils import cosine_schedule
+import scripts.hoogeboom as hgb
 
 def get_sampling_fn_noise_forward(config, initial_sample, intermediate_sample_indices, delta, device, share_noise=False, degradation_operator=None):
     # sampler as described in Bansal et al. 2023 (TaCoS)
@@ -95,6 +96,31 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                         intermediate_samples_out.append((u, diff))
 
                 return u_mean, config.model.K, [u for (u, diff) in intermediate_samples_out], [diff for (u, diff) in intermediate_samples_out]
+    
+    elif config.model.loss_type == 'hoogeboom':
+        def sampler(model):
+            intermediate_samples_out = []
+            with torch.no_grad():
+                u = initial_sample.to(config.device).float()
+                u = torch.randn_like(u)
+                if intermediate_sample_indices != None and K in intermediate_sample_indices:
+                    intermediate_samples_out.append((u, u))
+                steps = np.linspace(1, 0, K)
+                for i, t in enumerate(steps[:-1]):
+                    t = torch.ones(
+                        initial_sample.shape[0], device=device, dtype=torch.long) * t
+                    
+                    z = torch.randn(config.eval.batch_size, config.model.encoder.latent_dim, device=config.device)
+                    u_mean, noise = hgb.denoise(u, t, model, config.data.image_size, z, config.model.blur_sigma_max, K)
+
+                    u = u_mean + noise
+
+                    # Save trajectory
+                    if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
+                        intermediate_samples_out.append((u, u_mean))
+                    
+                return u_mean, config.model.K, [u for (u, mean) in intermediate_samples_out], [mean for (u, mean) in intermediate_samples_out]
+
             
     elif config.model.loss_type == 'trajectory_matching':
         def sampler(model):

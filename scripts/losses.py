@@ -6,6 +6,7 @@ import torch.optim as optim
 import numpy as np
 from model_code import utils as mutils
 import torch.distributions
+from scripts import hoogeboom as hgb
 
 
 def get_optimizer(config, params):
@@ -88,6 +89,30 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                 loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
 
                 return loss, (reconstruction_loss, kl_div), fwd_steps
+            
+        elif config.model.loss_type == 'hoogeboom':
+            def loss_fn(model, batch):
+                model_fn = mutils.get_model_fn(
+                    model, train=train)
+                t = torch.tensor(np.float32(np.random.uniform(0, 1, batch.shape[0])), device=device)
+                
+                blurred, eps, sigma = hgb.diffuse(batch, t, config.data.image_size, config.model.blur_sigma_max)
+                perturbed_blurred = blurred + sigma * eps
+
+                prediction, z, (mu, log_var) = model_fn(perturbed_blurred, blurred, t)
+
+                # l2 norm of eps prediction
+                reconstruction_loss = (eps - prediction)**2
+                reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
+
+                # kl divergence of z_t encoder
+                kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+
+                loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
+
+                return loss, (reconstruction_loss, kl_div), t
+
+
             
         elif config.model.loss_type == 'trajectory_matching':
             def loss_fn(model, batch):
