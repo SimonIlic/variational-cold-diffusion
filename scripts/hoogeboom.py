@@ -18,10 +18,11 @@ def get_frequency_scaling(t, img_dim, sigma_blur_max, min_scale=0.001):
 
     # Compute frequencies
     freqs = torch.pi * torch.linspace(0, img_dim - 1, img_dim, device=t.device) / img_dim
-    labda = freqs[:, None]**2 + freqs[None, :]**2
+    labda = freqs[None, None, :, None] ** 2 + freqs[None, None, None, :] ** 2
+
 
     # Compute scaling for frequencies
-    scaling = torch.exp(-labda * dissipation_time) * (1 - min_scale)
+    scaling = torch.exp(dissipation_time * -labda) * (1 - min_scale)
     scaling = scaling + min_scale
     return scaling
 
@@ -43,30 +44,24 @@ def get_noise_scaling_cosine(t, logsnr_min=-10, logsnr_max=10):
 
 # Function to perform diffusion
 def diffuse(x, t, img_dim, sigma_blur_max):
-
-    # reshape t to fit data batch and channels
-    if len(x.shape) == 4:
-        t = t[:, None, None, None]
-    elif len(x.shape) == 3:
-        t = t[:, None, None]
-
-
+    t = t[:, None, None, None]
     x_freq = DCT(x)
     alpha, sigma = get_alpha_sigma(t, img_dim, sigma_blur_max)
+    print(alpha, sigma)
     eps = torch.randn_like(x)
 
     # Perform diffusion
     z_t = IDCT(alpha * x_freq)
+
+    # print shapes with names
+    print("x shape: ", x.shape, "t shape: ", t.shape, "x_freq shape: ", x_freq.shape, "alpha shape: ", alpha.shape, "sigma shape: ", sigma.shape, "eps shape: ", eps.shape, "z_t shape: ", z_t.shape)
     return z_t, eps, sigma
 
 # Function to perform denoising
 def denoise(z_t, t, neural_net, img_dim, encoder_noise, sigma_blur_max, T=1000, delta=1e-8):
     straight_t = t
     # reshape t to fit data batch and channels
-    if len(z_t.shape) == 4:
-        t = t[:, None, None, None]
-    elif len(z_t.shape) == 3:
-        t = t[:, None, None]
+    t = t[:, None, None, None]
 
     alpha_s, sigma_s = get_alpha_sigma(t - 1 / T, img_dim, sigma_blur_max)
     alpha_t, sigma_t = get_alpha_sigma(t, img_dim, sigma_blur_max)
@@ -74,17 +69,16 @@ def denoise(z_t, t, neural_net, img_dim, encoder_noise, sigma_blur_max, T=1000, 
     # Compute helpful coefficients
     alpha_ts = alpha_t / alpha_s
     alpha_st = 1 / alpha_ts
-    sigma2_ts = (sigma_t ** 2 - alpha_ts ** 2 * sigma_s ** 2)
+    sigma2_ts = sigma_t ** 2 - alpha_ts ** 2 * sigma_s ** 2
 
     # Denoising variance
     sigma2_denoise = 1 / torch.clip(
-        1 / torch.clip(sigma_s ** 2, min=delta) +
-        1 / torch.clip(sigma_t ** 2 / alpha_ts ** 2 - sigma_s ** 2, min=delta),
+        1 / torch.clip(sigma_s ** 2, min=delta) + alpha_ts ** 2 / torch.clip(sigma2_ts, min=delta),
         min=delta)
 
     # The coefficients for u_t and u_eps
     coeff_term1 = alpha_ts * sigma2_denoise / (sigma2_ts + delta)
-    coeff_term2 = alpha_st * sigma2_denoise / torch.clip(sigma_s ** 2, min=delta)
+    coeff_term2 = alpha_s * sigma2_denoise / torch.clip(sigma_s ** 2, min=delta)
 
     # Get neural net prediction
     t = straight_t
@@ -99,3 +93,13 @@ def denoise(z_t, t, neural_net, img_dim, encoder_noise, sigma_blur_max, T=1000, 
     # Sample from the denoising distribution
     eps = torch.randn_like(mu_denoise)
     return mu_denoise, IDCT(torch.sqrt(sigma2_denoise) * eps)
+
+if __name__ == '__main__':
+    # plot a and sigma from t 0 to 1
+    import matplotlib.pyplot as plt
+    t = torch.linspace(0, 1, 100)
+    alpha, sigma = get_noise_scaling_cosine(t)
+    plt.plot(t, alpha, label='alpha')
+    plt.plot(t, sigma, label='sigma')
+    plt.legend()
+    plt.show()
