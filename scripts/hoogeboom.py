@@ -5,6 +5,7 @@ import numpy as np
 
 # Define the Discrete Cosine Transform (DCT) and its inverse
 def DCT(x):
+    # make x 64 float
     return torch_dct.dct_2d(x, norm='ortho')
 
 def IDCT(x):
@@ -43,25 +44,22 @@ def get_noise_scaling_cosine(t, logsnr_min=-10, logsnr_max=10):
     return torch.sqrt(F.sigmoid(logsnr)), torch.sqrt(F.sigmoid(-logsnr))
 
 # Function to perform diffusion
-def diffuse(x, t, img_dim, sigma_blur_max):
-    t = t[:, None, None, None]
+def diffuse(x: torch.Tensor, t, img_dim, sigma_blur_max):
+    t = t[:, None, None, None].to(torch.float64)
+    x = x.to(torch.float64)
     x_freq = DCT(x)
     alpha, sigma = get_alpha_sigma(t, img_dim, sigma_blur_max)
-    print(alpha, sigma)
-    eps = torch.randn_like(x)
 
     # Perform diffusion
     z_t = IDCT(alpha * x_freq)
 
-    # print shapes with names
-    print("x shape: ", x.shape, "t shape: ", t.shape, "x_freq shape: ", x_freq.shape, "alpha shape: ", alpha.shape, "sigma shape: ", sigma.shape, "eps shape: ", eps.shape, "z_t shape: ", z_t.shape)
-    return z_t, eps, sigma
+    return z_t.float(), sigma.float()
 
 # Function to perform denoising
 def denoise(z_t, t, neural_net, img_dim, encoder_noise, sigma_blur_max, T=1000, delta=1e-8):
     straight_t = t
     # reshape t to fit data batch and channels
-    t = t[:, None, None, None]
+    t = t[:, None, None, None].to(torch.float64)
 
     alpha_s, sigma_s = get_alpha_sigma(t - 1 / T, img_dim, sigma_blur_max)
     alpha_t, sigma_t = get_alpha_sigma(t, img_dim, sigma_blur_max)
@@ -82,9 +80,10 @@ def denoise(z_t, t, neural_net, img_dim, encoder_noise, sigma_blur_max, T=1000, 
 
     # Get neural net prediction
     t = straight_t
-    hat_eps = neural_net(z_t, None, t, encoder_noise)
+    hat_eps = neural_net(z_t, None, t, encoder_noise).to(torch.float64)
 
     # Compute terms
+    z_t = z_t.to(torch.float64)
     u_t = DCT(z_t)
     term1 = IDCT(coeff_term1 * u_t)
     term2 = IDCT(coeff_term2 * (u_t - sigma_t * DCT(hat_eps)))
@@ -92,7 +91,8 @@ def denoise(z_t, t, neural_net, img_dim, encoder_noise, sigma_blur_max, T=1000, 
 
     # Sample from the denoising distribution
     eps = torch.randn_like(mu_denoise)
-    return mu_denoise, IDCT(torch.sqrt(sigma2_denoise) * eps)
+    print(sigma2_denoise.mean(), IDCT(torch.sqrt(sigma2_denoise) * eps).mean(), IDCT(torch.sqrt(sigma2_denoise) * eps).std())
+    return mu_denoise.float(), IDCT(torch.sqrt(sigma2_denoise) * eps).float(), z_t - sigma_t * hat_eps
 
 if __name__ == '__main__':
     # plot a and sigma from t 0 to 1

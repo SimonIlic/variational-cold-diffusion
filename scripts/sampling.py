@@ -111,13 +111,13 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                         initial_sample.shape[0], device=device, dtype=torch.long) * t
                     
                     z = torch.randn(config.eval.batch_size, config.model.encoder.latent_dim, device=config.device)
-                    u_mean, noise = hgb.denoise(u, t, model, config.data.image_size, z, config.model.blur_sigma_max, K)
+                    u_mean, noise, x0 = hgb.denoise(u, t, model, config.data.image_size, z, config.model.blur_sigma_max, K)
 
                     u = u_mean + noise
 
                     # Save trajectory
                     if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
-                        intermediate_samples_out.append((u, u_mean))
+                        intermediate_samples_out.append((u, x0))
                     
                 return u_mean, config.model.K, [u for (u, mean) in intermediate_samples_out], [mean for (u, mean) in intermediate_samples_out]
 

@@ -96,7 +96,8 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                     model, train=train)
                 t = torch.tensor(np.float32(np.random.uniform(0, 1, batch.shape[0])), device=device)
                 
-                blurred, eps, sigma = hgb.diffuse(batch, t, config.data.image_size, config.model.blur_sigma_max)
+                blurred, sigma = hgb.diffuse(batch, t, config.data.image_size, config.model.blur_sigma_max)
+                eps = torch.randn_like(blurred)
                 perturbed_blurred = blurred + sigma * eps
 
                 prediction, z, (mu, log_var) = model_fn(perturbed_blurred, blurred, t)
