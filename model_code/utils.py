@@ -57,6 +57,7 @@ class Fade(nn.Module):
 
     def forward(self, x, t):
         fade = cosine_schedule(t).sqrt().to(x.device)
+        fade[fade < 0.001] = 0.0
         # reshape sigmas for color images
         if len(x.shape) == 4:
             fade = fade[:, None, None, None]
@@ -73,9 +74,12 @@ class DCTBlur(nn.Module):
                                      image_size).to(device)/image_size
         self.frequencies_squared = freqs[:, None]**2 + freqs[None, :]**2
         self.max_blur = max_blur
+        self.min_blur = 0.5
         self.min_scale = min_scale
 
     def schedule(self, t):
+        return torch.exp(np.log(self.min_blur) * (1 - t) + np.log(self.max_blur) * t)
+
         return self.max_blur * torch.sin(t * torch.pi / 2)**2
         #return self.max_blur * torch.sin(t * torch.pi / 2)**2
 
@@ -93,9 +97,13 @@ class DCTBlur(nn.Module):
         
         # convert sigma to tau
         tau = sigmas ** 2 / 2
+
+        fade_freq = torch.exp(- self.frequencies_squared * tau)
+        # limit fade to 0.01 to 0.0 to prevent information leaking
+        fade_freq[fade_freq < 0.01] = 0.0
     
         dct_x = torch_dct.dct_2d(x, norm='ortho')
-        blurred_dct_x = dct_x * (torch.exp(- self.frequencies_squared * tau) * (1 - self.min_scale) + self.min_scale)
+        blurred_dct_x = dct_x * (fade_freq * (1 - self.min_scale) + self.min_scale)
         blurred_x =  torch_dct.idct_2d(blurred_dct_x, norm='ortho')
 
         return blurred_x.to(dtype)

@@ -91,7 +91,7 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                 return loss, (reconstruction_loss, kl_div), fwd_steps
             
         elif config.model.loss_type == 'hoogeboom':
-            def loss_fn(model, batch):
+            def loss_fn(model, batch, iteration=0):
                 model_fn = mutils.get_model_fn(
                     model, train=train)
                 t = torch.tensor(np.float32(np.random.uniform(0, 1, batch.shape[0])), device=device)
@@ -109,13 +109,19 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                 # kl divergence of z_t encoder
                 kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
 
-                loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
+                if iteration > 1000:
+                    loss = torch.mean(reconstruction_loss) + torch.mean(kl_div) * np.clip(iteration / 10000, 0, 1)
+                else:
+                    loss = torch.mean(reconstruction_loss)
+
+                iteration += 1
+                print(iteration)
 
                 return loss, (reconstruction_loss, kl_div), t
 
 
             
-        elif config.model.loss_type == 'trajectory_matching':
+        elif config.model.loss_type == 'trajectory_matching_old':
             def loss_fn(model, batch):
                 model_fn = mutils.get_model_fn(
                     model, train=train)
@@ -141,8 +147,58 @@ def get_inverse_heat_loss_fn(config, train, scales, device, heat_forward_module)
                 loss = torch.mean(reconstruction_loss) + torch.mean(kl_div)
 
                 return loss, (reconstruction_loss, kl_div), fwd_steps
+            
+        elif config.model.loss_type == 'trajectory_matching':
+            K = config.model.K
+            def loss_fn(model, batch, step=0):
+                model_fn = mutils.get_model_fn(
+                    model, train=train)
+                
+                # warmup is normal optimization of known forward
+                if step < config.model.warmup:
+                    t = torch.tensor(np.float32(np.random.uniform(1/K, 1, batch.shape[0])), device=device)
+                    input = heat_forward_module(batch, t)
+                    target = heat_forward_module(batch, t - 1/K)
+                
+                # after warmup we start trajectory matching
+                else:
+                    # split batch into two
+                    batch1, batch2 = torch.split(batch, int(config.model.trajectory_fraction * batch.shape[0]))
+
+                    # batch1 will be perturbed
+                    t1 = torch.tensor(np.float32(np.random.uniform(1/K, 1 - 1/K, batch1.shape[0])), device=device)
+                    input1 = heat_forward_module(batch1, t1 + 1/K)
+                    intermediate = heat_forward_module(batch1, t1)
+                    with torch.no_grad():
+                        input1, z, latent_params = model_fn(input1, intermediate, t1 + 1/K)
+                    target1 = heat_forward_module(batch1, t1 - 1/K)
+
+                    # batch2 will be deterministc
+                    t2 = torch.tensor(np.float32(np.random.uniform(1/K, 1, batch2.shape[0])), device=device)
+                    input2 = heat_forward_module(batch2, t2)
+                    target2 = heat_forward_module(batch2, t2 - 1/K)
+
+                    input = torch.cat((input1, input2), dim=0)
+                    target = torch.cat((target1, target2), dim=0)
+                    t = torch.cat((t1, t2), dim=0)
+
+                prediction, z, (mu, log_var) = model_fn(input, target, t)
+
+                reconstruction_loss = (prediction - target)**2
+                reconstruction_loss = torch.sum(reconstruction_loss.reshape(reconstruction_loss.shape[0], -1), dim=-1)
+
+                kl_div = 0.5 * torch.sum(torch.exp(log_var) + mu**2 - 1 - log_var, dim=-1)
+
+                # KL annealing
+                if step > config.model.warmup:
+                    loss = torch.mean(reconstruction_loss) + torch.mean(kl_div) * np.clip((step - config.model.warmup) / config.model.anneal_steps, 0,1) * config.model.beta
+                else:
+                    loss = torch.mean(reconstruction_loss)
 
 
+                return loss, (reconstruction_loss, kl_div), t
+                    
+                    
         elif config.model.loss_type == 'bansal':
             def loss_fn(model, batch):
                 model_fn = mutils.get_model_fn(
@@ -247,7 +303,7 @@ def get_step_fn(train, scales, config, optimize_fn=None,
     # For automatic mixed precision
     scaler = torch.cuda.amp.GradScaler()
 
-    def step_fn(state, batch):
+    def step_fn(state, batch, step):
         """Running one step of training or evaluation.
         Returns:
                 loss: The average loss value of this state.
@@ -258,7 +314,7 @@ def get_step_fn(train, scales, config, optimize_fn=None,
             if config.optim.automatic_mp:
                 optimizer.zero_grad()
                 with torch.cuda.amp.autocast():
-                    loss, losses_batch, fwd_steps_batch = loss_fn(model, batch)
+                    loss, losses_batch, fwd_steps_batch = loss_fn(model, batch, step)
                     # amp not recommended in backward pass, but had issues getting this to work without it
                     # Followed https://github.com/pytorch/pytorch/issues/37730
                     scaler.scale(loss).backward()
@@ -269,7 +325,7 @@ def get_step_fn(train, scales, config, optimize_fn=None,
                 state['ema'].update(model.parameters())
             else:
                 optimizer.zero_grad()
-                loss, losses_batch, fwd_steps_batch = loss_fn(model, batch)
+                loss, losses_batch, fwd_steps_batch = loss_fn(model, batch, step)
                 loss.backward()
                 optimize_fn(optimizer, model.parameters(), step=state['step'])
                 state['step'] += 1

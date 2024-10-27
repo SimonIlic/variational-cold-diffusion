@@ -126,7 +126,7 @@ def train(config, workdir):
         except StopIteration:  # Start new epoch if run out of data
             train_iter = iter(trainloader)
             batch = next(train_iter)[0].to(config.device).float()
-        loss, losses_batch, fwd_steps_batch = train_step_fn(state, batch)
+        loss, losses_batch, fwd_steps_batch = train_step_fn(state, batch, step)
 
         writer.add_scalar("training_loss", loss.item(), step)
         wandb.log({"training_loss": loss.item(), "step": step})
@@ -147,7 +147,7 @@ def train(config, workdir):
                 except StopIteration:  # Start new epoch
                     eval_iter = iter(testloader)
                     eval_batch = next(eval_iter)[0].to(config.device).float()
-                eval_loss, eval_losses_batch, fwd_steps_batch = eval_step_fn(state, eval_batch)
+                eval_loss, eval_losses_batch, fwd_steps_batch = eval_step_fn(state, eval_batch, step)
                 eval_loss = eval_loss.detach()
             logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
             logging.info("step: %d, train_loss: %.5e" % (step, loss.item()))

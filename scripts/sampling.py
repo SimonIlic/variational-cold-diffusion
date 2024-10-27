@@ -4,6 +4,7 @@ import logging
 from scripts import datasets
 from model_code.utils import cosine_schedule
 import scripts.hoogeboom as hgb
+from scripts.utils import save_gif
 
 def get_sampling_fn_noise_forward(config, initial_sample, intermediate_sample_indices, delta, device, share_noise=False, degradation_operator=None):
     # sampler as described in Bansal et al. 2023 (TaCoS)
@@ -56,7 +57,7 @@ def get_sampling_fn_noise_forward(config, initial_sample, intermediate_sample_in
 
 def get_sampling_fn_inverse_heat(config, initial_sample,
                                  intermediate_sample_indices, delta, device,
-                                 share_noise=False, degradation_operator=None):
+                                 share_noise=False, degradation_operator=None, resample_z=False):
     """ Returns our inverse heat process sampling function. 
     Arguments: 
     initial_sample: Pytorch Tensor with the initial draw from the prior p(u_K)
@@ -108,9 +109,9 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                 steps = np.linspace(1, 0, K)
                 for i, t in enumerate(steps[:-1]):
                     t = torch.ones(
-                        initial_sample.shape[0], device=device, dtype=torch.long) * t
+                        initial_sample.shape[0], device=u.device, dtype=torch.long) * t
                     
-                    z = torch.randn(config.eval.batch_size, config.model.encoder.latent_dim, device=config.device)
+                    z = torch.randn(config.eval.batch_size, config.model.encoder.latent_dim, device=u.device)
                     u_mean, noise, x0 = hgb.denoise(u, t, model, config.data.image_size, z, config.model.blur_sigma_max, K)
 
                     u = u_mean + noise
@@ -133,13 +134,13 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                 u = initial_sample.to(config.device).float()
                 if intermediate_sample_indices != None and K in intermediate_sample_indices:
                     intermediate_samples_out.append((u, u))
-                for i in range(K, 0, -1):
+                for t in np.linspace(1, 0, K+1):
                     vec_fwd_steps = torch.ones(
-                        initial_sample.shape[0], device=device, dtype=torch.long) * i
-                    scales = blur_schedule[vec_fwd_steps]
+                        initial_sample.shape[0], device=device, dtype=torch.long) * t
                     # Predict less blurry mean
                     z = torch.randn(config.eval.batch_size, config.model.encoder.latent_dim, device=config.device)
-                    u_mean = model(u, None, scales, z)
+                    prediction = model(u, None, vec_fwd_steps, z)
+                    u_mean = prediction
                     # Sampling step
                     if share_noise:
                         noise = noises[i-1]
@@ -147,10 +148,9 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                         noise = torch.randn_like(u)
                     u = u_mean + noise*delta
                     # Save trajectory
-                    if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
-                        intermediate_samples_out.append((u, u_mean))
+                    intermediate_samples_out.append((u, u_mean))
 
-                return u_mean, config.model.K, [u for (u, mean) in intermediate_samples_out], [mean for (u, mean) in intermediate_samples_out]
+                return u_mean, config.model.K, [u for (u, mean) in intermediate_samples_out], [u_mean for (u, u_mean) in intermediate_samples_out]
     
     elif config.model.loss_type == "bansal" or config.model.loss_type == "variable_t":
         # sampler as described in Bansal et al. 2023 (TaCoS)
@@ -167,12 +167,22 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
 
                     # predict reconstruction
                     if i == 0:
+                        # share noise
                         z = torch.randn(config.model.encoder.latent_dim, device=config.device)
                         # expand z to batch size
                         z = z.expand(u.shape[0], -1)
+
+                        # do not share noise
+                        z = torch.randn(config.eval.batch_size, config.model.encoder.latent_dim, device=config.device)
+                        print("Sampling with different noise per trajectory")
                         reconstructed = model(u, None, vec_t, z)
                     else:
-                        reconstructed = model(u, reconstructed, vec_t, None)
+                        if resample_z:
+                            print("New noise sampled at each step")
+                            z = torch.randn(config.eval.batch_size, config.model.encoder.latent_dim, device=config.device)
+                        else:
+                            z = None
+                        reconstructed = model(u, reconstructed, vec_t, z)
                     
                     # update step-by-step reconstruction
                     u = u - degradation_operator(reconstructed, vec_t) + degradation_operator(reconstructed, torch.ones(
@@ -186,6 +196,11 @@ def get_sampling_fn_inverse_heat(config, initial_sample,
                     # Save trajectory
                     if intermediate_sample_indices != None and i-1 in intermediate_sample_indices:
                         intermediate_samples_out.append((u, reconstructed))
+
+                # final step
+                reconstructed = model(u, reconstructed, vec_t * 0, None)
+                u = u - degradation_operator(reconstructed, vec_t * 0) + reconstructed
+                intermediate_samples_out.append((u, reconstructed))
                 
                 return u, config.model.K, [u for (u, reconstructed) in intermediate_samples_out], [reconstructed for (u, reconstructed) in intermediate_samples_out]
 
@@ -244,7 +259,7 @@ def get_sampling_fn_inverse_heat_interpolate(config, initial_sample,
     return sampler, init_input
 
 
-def get_initial_sample(config, forward_heat_module, delta, batch_size=None):
+def get_initial_sample(config, forward_heat_module, delta, batch_size=None, workdir="/"):
     """Take a draw from the prior p(u_K)"""
     trainloader, testloader = datasets.get_dataset(config,
                                           uniform_dequantization=config.data.uniform_dequantization,
@@ -252,6 +267,10 @@ def get_initial_sample(config, forward_heat_module, delta, batch_size=None):
 
     initial_sample = next(iter(testloader))[0].to(config.device)
     original_images = initial_sample.clone()
+    # save forward as gif
+    trajectory = forward_trajectory(initial_sample, config, forward_heat_module)
+    #save_gif(workdir, trajectory, name="forward.gif")
+
     initial_sample = forward_heat_module(initial_sample,
                                          torch.ones(initial_sample.shape[0], dtype=torch.long).to(config.device))
     return initial_sample, original_images
@@ -265,3 +284,11 @@ def get_noise_initial_sample(config):
     initial_sample = torch.randn(config.eval.batch_size, config.data.num_channels, config.data.image_size, config.data.image_size).to(config.device)
     return initial_sample
 
+def forward_trajectory(images, config, forward_heat_module):
+    trajectory = [images]
+    for t in np.linspace(0, 1, config.model.K + 1):
+        vec_t = torch.ones(images.shape[0], device=config.device, dtype=torch.long) * t
+        blurred = forward_heat_module(images, vec_t)
+        trajectory.append(blurred)
+
+    return trajectory

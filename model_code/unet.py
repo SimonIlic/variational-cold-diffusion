@@ -141,6 +141,7 @@ class Downsample(nn.Module):
         else:
             assert self.channels == self.out_channels
             self.op = avg_pool_nd(dims, kernel_size=stride, stride=stride)
+            raise ValueError("Downsampling using average pooling")
 
     def forward(self, x):
         assert x.shape[1] == self.channels
@@ -550,7 +551,7 @@ class UNetModel(nn.Module):
 
         self.middle_block = TimestepEmbedSequential(
             ResBlock(
-                ch,
+                ch + latent_dim,
                 time_embed_dim,
                 dropout,
                 dims=dims,
@@ -559,7 +560,7 @@ class UNetModel(nn.Module):
                 padding_mode=self.padding_mode
             ),
             AttentionBlock(
-                ch,
+                ch + latent_dim,
                 use_checkpoint=use_checkpoint,
                 num_heads=num_heads,
                 num_head_channels=num_head_channels,
@@ -567,10 +568,11 @@ class UNetModel(nn.Module):
                 padding_mode=self.padding_mode
             ),
             ResBlock(
-                ch,
+                ch + latent_dim,
                 time_embed_dim,
                 dropout,
                 dims=dims,
+                out_channels=ch,
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
                 padding_mode=self.padding_mode
@@ -655,6 +657,9 @@ class UNetModel(nn.Module):
         for module in self.input_blocks:
             h = module(h, emb)
             hs.append(h)
+        # expand z and stack to middle block input
+        z_expanded = z.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, h.shape[-2], h.shape[-1])
+        h = th.cat([h, z_expanded], dim=1)
         h = self.middle_block(h, emb)
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
@@ -709,7 +714,7 @@ class VAEncoder(nn.Module):
         self.model_channels = model_channels = config.model.model_channels
         self.out_channels = out_channels = config.data.num_channels
         self.num_res_blocks = num_res_blocks = config.model.num_res_blocks
-        self.attention_levels = attention_levels = config.model.attention_levels
+        self.attention_levels = attention_levels = () # config.model.attention_levels  DO NOT use self attention blocks in the encoder
         self.dropout = dropout = config.model.dropout
         self.channel_mult = channel_mult = config.model.channel_mult
         self.conv_resample = conv_resample = config.model.conv_resample
@@ -806,12 +811,9 @@ class VAEncoder(nn.Module):
                 use_scale_shift_norm=use_scale_shift_norm,
                 padding_mode=self.padding_mode
             ),
-            AttentionBlock(
-                ch,
-                use_checkpoint=use_checkpoint,
-                num_heads=num_heads,
-                num_head_channels=num_head_channels,
-                use_new_attention_order=use_new_attention_order,
+            # Downsample one more time
+            Downsample(
+                ch, conv_resample, dims=dims, out_channels=ch,
                 padding_mode=self.padding_mode
             ),
             ResBlock(
@@ -827,15 +829,15 @@ class VAEncoder(nn.Module):
         self._feature_size += ch
 
         # create fc mu, var layers
-        # final image is 4x4
-        fc_mu = [linear(ch * 4 * 4, latent_dim)]
+        # final image is 2x2
+        fc_mu = [linear(ch * 2 * 2, latent_dim)]
         for _ in range(config.model.encoder.fc_layers - 1):
             fc_mu += [nn.SiLU(), linear(latent_dim, latent_dim)]
         self.fc_mu = nn.Sequential(*fc_mu)
 
-        fc_var = [linear(ch * 4 * 4, latent_dim)]
+        fc_var = [linear(ch * 2 * 2, latent_dim)]
         for _ in range(config.model.encoder.fc_layers - 1):
-            fc_var += [nn.SiLU(), linear(latent_dim, latent_dim)]
+            fc_var += [normalization(latent_dim), nn.SiLU(), linear(latent_dim, latent_dim)]
         self.fc_var = nn.Sequential(*fc_var)
 
     def reparameterize(self, mu, logvar):

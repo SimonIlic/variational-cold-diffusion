@@ -99,6 +99,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     t = torch.linspace(0, 1, 100)
     alpha, sigma = get_noise_scaling_cosine(t)
+    print(max(alpha), min(alpha), max(sigma), min(sigma))
     plt.plot(t, alpha, label='alpha')
     plt.plot(t, sigma, label='sigma')
     plt.legend()

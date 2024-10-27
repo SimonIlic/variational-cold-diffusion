@@ -34,6 +34,9 @@ flags.DEFINE_float("final_noise", None,
 flags.DEFINE_bool("interpolate", False, "Whether to do interpolation")
 flags.DEFINE_integer(
     "number", None, "add a number suffix to generated sample in interpolate")
+# add flag for K steps
+flags.DEFINE_integer("K", None, "Number of steps in the diffusion process")
+flags.DEFINE_bool("resample_z", False, "Use random z at each sampling step")
 
 
 def main(argv):
@@ -42,14 +45,18 @@ def main(argv):
                            FLAGS.delta, FLAGS.num_points, FLAGS.number)
     else:
         sample(FLAGS.config, FLAGS.workdir, FLAGS.checkpoint, FLAGS.save_sample_freq, FLAGS.delta,
-               FLAGS.batch_size, FLAGS.share_noise, FLAGS.same_init)
+               FLAGS.batch_size, FLAGS.share_noise, FLAGS.same_init, FLAGS.K, FLAGS.resample_z)
 
 
 def sample(config, workdir, checkpoint, save_sample_freq=1,
-           delta=0, batch_size=None, share_noise=False, same_init=False):
+           delta=0, batch_size=None, share_noise=False, same_init=False, K=None, resample_z=False):
 
     if batch_size == None:
         batch_size = config.training.batch_size
+    config.eval.batch_size = batch_size
+
+    if K is not None:
+        config.model.K = K
 
     if checkpoint > 0:
         checkpoint_dir = os.path.join(workdir, "checkpoints")
@@ -59,14 +66,13 @@ def sample(config, workdir, checkpoint, save_sample_freq=1,
         checkpoint_dir = os.path.join(workdir, "checkpoints-meta")
         model = utils.load_model_from_checkpoint_dir(config, checkpoint_dir)
 
-    model_fn = mutils.get_model_fn(model, train=False, sample=True)
+    model_fn = mutils.get_model_fn(model, train=False, sample=True if config.model.type == 'vae' else False)
     logging.info("Loaded model from {}".format(checkpoint_dir))
     logging.info("Running on {}".format(config.device))
 
     logging.info("Creating the forward process...")
     scales = config.model.blur_schedule
-    heat_forward_module = mutils.create_forward_process_from_sigmas(
-        config, scales, config.device)
+    heat_forward_module = create_degrader(config)
     logging.info("Done")
     initial_sample, original_images = sampling.get_initial_sample(
         config, heat_forward_module, delta, batch_size)
@@ -85,7 +91,7 @@ def sample(config, workdir, checkpoint, save_sample_freq=1,
 
     # Get smapling function and save directory
     sampling_fn = sampling.get_sampling_fn_inverse_heat(config, initial_sample,
-                                                        intermediate_sample_indices, delta, config.device, share_noise=share_noise, degradation_operator=heat_forward_module)
+                                                        intermediate_sample_indices, delta, config.device, share_noise=share_noise, degradation_operator=heat_forward_module, resample_z=resample_z)
     this_sample_dir = os.path.join(this_sample_dir, "delta_{}".format(delta))
     if same_init:
         this_sample_dir += "_same_init"
@@ -169,6 +175,22 @@ def sample_interpolate(config, workdir, checkpoint,
                          torch.cat([x_sweep, x_sweep[-1:].repeat(10, 1, 1, 1), reversed(x_sweep), x_sweep[:1].repeat(10, 1, 1, 1)]))
     logging.info("Done!")
 
+
+def create_degrader(config):
+    if config.degrader == 'hard_vignette':
+        return mutils.hard_vignette_forward_process(config)
+    elif config.degrader == 'vignette':
+        return mutils.vignette_forward_process(config)
+    elif config.degrader == 'blur':
+        return mutils.create_forward_process_from_sigmas(config, config.device)
+    elif config.degrader == 'fade':
+        return mutils.fade_forward_process(config)
+    elif config.degrader == 'blur_fade':
+        blur = mutils.create_forward_process_from_sigmas(config, config.device)
+        fade = mutils.fade_forward_process(config)
+        return mutils.combo_forward_process(config, [blur, fade])
+    elif config.degrader == 'noise':
+        return mutils.noise_forward_process(config)
 
 if __name__ == "__main__":
     app.run(main)

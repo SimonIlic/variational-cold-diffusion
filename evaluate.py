@@ -99,8 +99,7 @@ def calculate_fid(config, dataset_name, experiment_name, param_name,
     logging.info("Getting filter scales")
     scales = config.model.blur_schedule
     logging.info("Creating the filter array...")
-    forward_process_module = mutils.create_forward_process_from_sigmas(
-        config, scales, config.device)
+    forward_process_module = create_degrader(config)
     logging.info("Done")
 
     # Get the data
@@ -129,9 +128,8 @@ def calculate_fid(config, dataset_name, experiment_name, param_name,
             batch, K*torch.ones(batch.shape[0], dtype=torch.long, device=config.device))
         # add the initial noise
         batch = batch + torch.randn_like(batch) * delta
-        sampling_fn = sampling.get_sampling_fn_inverse_heat(config,
-                                                            batch, intermediate_sample_indices=None, delta=delta, device=config.device)
-
+        sampling_fn = sampling.get_sampling_fn_inverse_heat(config, initial_sample,
+                                                        intermediate_sample_indices, delta, config.device, share_noise=share_noise, degradation_operator=heat_forward_module)
         sample, _, _ = sampling_fn(model)
         sample = torch.clip(sample*255., 0, 255).to(torch.uint8)
         return sample
@@ -202,6 +200,21 @@ def calculate_ELBO(config, dataset_name, experiment_name, param_name,
     utils.append_to_dict(dataset_name, experiment_name,
                          param_name, "ELBO", return_val)
 
+def create_degrader(config):
+    if config.degrader == 'hard_vignette':
+        return mutils.hard_vignette_forward_process(config)
+    elif config.degrader == 'vignette':
+        return mutils.vignette_forward_process(config)
+    elif config.degrader == 'blur':
+        return mutils.create_forward_process_from_sigmas(config, config.device)
+    elif config.degrader == 'fade':
+        return mutils.fade_forward_process(config)
+    elif config.degrader == 'blur_fade':
+        blur = mutils.create_forward_process_from_sigmas(config, config.device)
+        fade = mutils.fade_forward_process(config)
+        return mutils.combo_forward_process(config, [blur, fade])
+    elif config.degrader == 'noise':
+        return mutils.noise_forward_process(config)
 
 if __name__ == "__main__":
     app.run(main)
