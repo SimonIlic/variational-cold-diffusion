@@ -1,9 +1,6 @@
 # ignore .history folder
 .history
 
-# ignore notebooks
-*.ipynb
-
 # ignore runs
 runs
 
